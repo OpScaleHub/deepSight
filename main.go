@@ -1,28 +1,9 @@
 package main
 
 /*
-#cgo pkg-config: gimp-3.0 gimpui-3.0
-#include <libgimp/gimp.h>
-#include <libgimp/gimppdb.h>
-#include <libgimp/gimpui.h>
-#include <string.h> // For C.CString, C.GoStringN
-#include <stdlib.h> // For C.free
-#include <glib.h>   // For C types like gint32
-
-// Forward declarations for Go functions exported to C
-void query(void);
-void run(const gchar *name, gint nparams, const GimpParam *param, gint *nreturn_vals, GimpParam **return_vals);
-
-// C helper function to create a string for GIMP
-static gchar* to_gchar(const char* s) {
-    return (gchar*)s;
-}
-
-// C helper to get a widget from a GimpDialog
-static GtkWidget* get_widget_from_dialog(GimpDialog *dialog, const gchar *role) {
-    return gimp_dialog_get_widget(dialog, role);
-}
-
+#cgo CFLAGS: -I/usr/include/gimp-3.0 -I/usr/include/glib-2.0 -I/usr/include/gtk-3.0 -I/usr/include/cairo -I/usr/lib/x86_64-linux-gnu/glib-2.0/include -I/usr/include/gegl-0.4 -I/usr/include/babl-0.1 -I/usr/include/gdk-pixbuf-2.0
+#cgo LDFLAGS: -lgimp-3.0 -lgimpui-3.0 -lgobject-2.0 -lgtk-3.0 -lcairo -lgegl-0.4 -lbabl-0.1 -lgdk_pixbuf-2.0
+#include "gimini.c"
 */
 import "C"
 
@@ -52,6 +33,7 @@ const (
 	pluginMenuLabel   = "Gemini Image Generator..."
 	pluginMenuPath    = "<Image>/Filters/AI Tools"
 	pluginConfigKey   = "gimini-api-key"
+	apiKeyFile        = "gimini-api-key.txt"
 )
 
 // Plugin constants
@@ -93,16 +75,26 @@ func query() {
 	defer C.free(unsafe.Pointer(cPluginDate))
 	cMenuLabel := C.CString(pluginMenuLabel)
 	defer C.free(unsafe.Pointer(cMenuLabel))
+	cImageTypes := C.CString("RGB*, GRAY*")
+	defer C.free(unsafe.Pointer(cImageTypes))
 	cMenuPath := C.CString(pluginMenuPath)
 	defer C.free(unsafe.Pointer(cMenuPath))
 
 	// Define the arguments for the PDB procedure
-	// GIMP passes these to the `run` function
-	args := C.GimpParamDef{
-		C.GIMP_PDB_INT32,
-		C.CString("run-mode"),
-		C.CString("Run mode"),
+	args := [3]C.GimpParamDef{
+		{C.GIMP_PDB_INT32, C.CString("run-mode"), C.CString("Interactive, non-interactive")},
+		{C.GIMP_PDB_IMAGE, C.CString("image"), C.CString("Input image")},
+		{C.GIMP_PDB_DRAWABLE, C.CString("drawable"), C.CString("Input drawable")},
 	}
+	// Free the C strings for args after use
+	defer func() {
+		C.free(unsafe.Pointer(args[0].name))
+		C.free(unsafe.Pointer(args[0].description))
+		C.free(unsafe.Pointer(args[1].name))
+		C.free(unsafe.Pointer(args[1].description))
+		C.free(unsafe.Pointer(args[2].name))
+		C.free(unsafe.Pointer(args[2].description))
+	}()
 
 	// Register the plugin procedure with GIMP
 	C.gimp_install_procedure(
@@ -113,10 +105,10 @@ func query() {
 		cPluginCopyright,
 		cPluginDate,
 		cMenuLabel,
-		C.to_gchar(C.CString("RGB*, GRAY*")), // Image types
+		cImageTypes,
 		C.GIMP_PLUGIN,
-		1, 0, // nparams, nreturn_vals for the procedure itself
-		&args, nil,
+		3, 1, // nparams, nreturn_vals for the procedure itself
+		&args[0], nil,
 	)
 
 	// Associate the menu path with the procedure
@@ -127,20 +119,25 @@ func query() {
 func run(name *C.gchar, nparams C.gint, param *C.GimpParam, nreturn_vals *C.gint, return_vals **C.GimpParam) {
 	// Setup return values for GIMP
 	*nreturn_vals = 1
-	*return_vals = C.gimp_param_new(0)
+	paramSize := C.size_t(unsafe.Sizeof(C.GimpParam{}))
+	*return_vals = (**C.GimpParam)(C.g_slice_alloc(paramSize))
+	retParam := (*C.GimpParam)(unsafe.Pointer(*return_vals))
+	retParam.Type = C.GIMP_PDB_STATUS
 	status := C.GIMP_PDB_SUCCESS
+	retParam.data.d_status = status
 
 	// Get image and drawable IDs from GIMP
-	pluginVals.imageID = param.data.d_image
-	pluginVals.drawableID = param.data.d_drawable
+	runMode := param[0].data.d_int32
+	pluginVals.imageID = param[1].data.d_image
+	pluginVals.drawableID = param[2].data.d_drawable
 
 	// Initialize GIMP UI
-	C.gimp_ui_init(C.CString(pluginName), C.gboolean(0))
+	C.gimp_ui_init(cPluginName, C.gboolean(0))
 
 	// Create the UI dialog and check if the user clicked "OK"
 	if !createDialog() {
 		status = C.GIMP_PDB_CANCEL
-		(*return_vals).data.d_status = status
+		retParam.data.d_status = status
 		return
 	}
 
@@ -160,8 +157,8 @@ func run(name *C.gchar, nparams C.gint, param *C.GimpParam, nreturn_vals *C.gint
 	// End progress bar
 	C.gimp_progress_end()
 
-	// Set final status and return
-	(*return_vals).data.d_status = status
+	// Set final status
+	retParam.data.d_status = status
 }
 
 // createDialog builds and runs the GTK dialog for the plugin.
@@ -172,7 +169,7 @@ func createDialog() bool {
 	// Create dialog
 	cDialogTitle := C.CString(pluginMenuLabel)
 	defer C.free(unsafe.Pointer(cDialogTitle))
-	dialog := C.gimp_dialog_new(cDialogTitle, C.CString(pluginName), nil, 0, nil)
+	dialog := C.gimp_dialog_new(cDialogTitle, C.CString(pluginName), nil, C.gboolean(0))
 
 	// Main content area
 	contentArea := C.gtk_dialog_get_content_area(GTK_DIALOG(unsafe.Pointer(dialog)))
@@ -313,7 +310,9 @@ func runPluginLogic() error {
 		// generate a placeholder image to prove the pipeline works.
 		log.Printf("GIMini: Vision API response received.")
 		if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
-			log.Printf("GIMini: Gemini Response: '%s'", resp.Candidates[0].Content.Parts[0])
+			if textPart, ok := resp.Candidates[0].Content.Parts[0].(genai.Text); ok {
+				log.Printf("GIMini: Gemini Response: '%s'", textPart)
+			}
 		}
 
 		generatedImageBytes, err = createDummyImage() // Placeholder for actual image data
@@ -361,10 +360,10 @@ func createLayerFromBytes(data []byte) error {
 	// Add the new layer to the image
 	C.gimp_image_insert_layer(pluginVals.imageID, newLayerID, nil, -1)
 
-	// Get a pixel region to write our data into
-	shadow := C.gimp_drawable_get_shadow_buffer(newLayerID)
-	destRect := C.GimpRectangle{0, 0, C.gint(width), C.gint(height)}
-	C.gimp_pixel_rgn_init(shadow, C.gimp_drawable_get_buffer(newLayerID), 0, 0, C.gint(width), C.gint(height), C.TRUE, C.TRUE) // shadow_is_writeable, shadow_is_dirty
+	// Get the drawable and create pixel region
+	drawable := C.gimp_drawable_get(newLayerID)
+	defer C.g_object_unref(C.gpointer(drawable))
+	rgn := C.gimp_pixel_rgn_new(drawable, 0, 0, C.gint(width), C.gint(height), C.FALSE, C.TRUE)
 
 	// Prepare pixel data for GIMP (non-premultiplied RGBA)
 	bpp := 4 // bytes per pixel (RGBA)
@@ -384,7 +383,8 @@ func createLayerFromBytes(data []byte) error {
 	}
 
 	// Write the pixel data to the GIMP layer
-	C.gimp_pixel_rgn_set_rect(shadow, (*C.guint8)(unsafe.Pointer(&pixels[0])), destRect.x, destRect.y, destRect.width, destRect.height)
+	destRect := C.GimpRectangle{0, 0, C.gint(width), C.gint(height)}
+	C.gimp_pixel_rgn_set_rect(rgn, (*C.guint8)(unsafe.Pointer(&pixels[0])), destRect.x, destRect.y, destRect.width, destRect.height)
 
 	// Update the drawable
 	C.gimp_drawable_flush(newLayerID)
@@ -401,8 +401,10 @@ func getLayerAsPNG(drawableID C.gint32) ([]byte, error) {
 	height := C.gimp_drawable_height(drawableID)
 	bpp := C.gimp_drawable_bpp(drawableID)
 
-	// Get a pixel region to read from
-	rgn := C.gimp_pixel_rgn_new(C.gimp_drawable_get_buffer(drawableID), 0, 0, width, height, C.FALSE, C.FALSE)
+	// Get the drawable and create pixel region
+	drawable := C.gimp_drawable_get(drawableID)
+	defer C.g_object_unref(C.gpointer(drawable))
+	rgn := C.gimp_pixel_rgn_new(drawable, 0, 0, width, height, C.FALSE, C.FALSE)
 	if rgn == nil {
 		return nil, fmt.Errorf("failed to create pixel region for drawable %d", drawableID)
 	}
@@ -456,26 +458,17 @@ func getLayerAsPNG(drawableID C.gint32) ([]byte, error) {
 // --- Helper Functions ---
 
 func saveAPIKey(key string) {
-	cKey := C.CString(key)
-	defer C.free(unsafe.Pointer(cKey))
-	cConfigKey := C.CString(pluginConfigKey)
-	defer C.free(unsafe.Pointer(cConfigKey))
-
-	// GIMP 3 uses parasites to store persistent plugin data with an image
-	C.gimp_parasite_set(cConfigKey, C.GIMP_PARASITE_PERSISTENT, C.gint(len(key)), C.gpointer(cKey))
+	if err := os.WriteFile(apiKeyFile, []byte(key), 0600); err != nil {
+		log.Printf("Failed to save API key: %v", err)
+	}
 }
 
 func loadAPIKey() string {
-	cConfigKey := C.CString(pluginConfigKey)
-	defer C.free(unsafe.Pointer(cConfigKey))
-
-	parasite := C.gimp_parasite_get(cConfigKey)
-	if parasite == nil {
+	data, err := os.ReadFile(apiKeyFile)
+	if err != nil {
 		return ""
 	}
-	defer C.gimp_parasite_free(parasite)
-
-	return C.GoStringN((*C.char)(C.gimp_parasite_data(parasite)), C.int(C.gimp_parasite_data_size(parasite)))
+	return string(data)
 }
 
 func getLayerName(prompt string) string {
