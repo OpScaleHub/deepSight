@@ -46,13 +46,28 @@
       <h3>Requests (last 60s)</h3>
       <div class="sparkline">
         {{ range .BarHeights }}
-          <div class="bar" style="height:{{ . }}px" title="{{ . }}"></div>
+          <div class="bar" data-h="{{ . }}" title="{{ . }}"></div>
         {{ end }}
       </div>
     </section>
 
     <footer class="muted">/health • /metrics • container-ready for k8s</footer>
   </div>
+
+  <script>
+    // set bar heights client-side to avoid template braces inside inline CSS
+    (function(){
+      try{
+        document.querySelectorAll('.bar').forEach(function(el){
+          var h = el.getAttribute('data-h');
+          if(!h) return;
+          el.style.height = h + 'px';
+        });
+      }catch(e){
+        // noop
+      }
+    })();
+  </script>
 
 </body>
 </html>
