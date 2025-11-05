@@ -10,8 +10,11 @@ RUN go mod download || true
 # Copy the source code
 COPY . .
 
-# Build the Go application (replace 'main.go' with your entry point if different)
-RUN go build -o main .
+# Build the Go application. Disable CGO and force Linux target so the binary
+# is statically linked and runnable in the lightweight final image.
+ENV CGO_ENABLED=0
+ENV GOOS=linux
+RUN go build -ldflags="-s -w" -o main .
 
 # Create a lightweight image for running
 FROM alpine:latest
