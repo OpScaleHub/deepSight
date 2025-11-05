@@ -1,516 +1,160 @@
 package main
 
-/*
-#cgo CFLAGS: -I/usr/include/gimp-3.0 -I/usr/include/glib-2.0 -I/usr/include/gtk-3.0 -I/usr/include/cairo -I/usr/lib/x86_64-linux-gnu/glib-2.0/include -I/usr/include/gegl-0.4 -I/usr/include/babl-0.1 -I/usr/include/gdk-pixbuf-2.0
-#cgo LDFLAGS: -lgimp-3.0 -lgimpui-3.0 -lgobject-2.0 -lgtk-3.0 -lcairo -lgegl-0.4 -lbabl-0.1 -lgdk_pixbuf-2.0
-#include "gimini.c"
-*/
-import "C"
-
 import (
-	"bytes"
-	"context"
-	"image"
-	"image/png"
-	"log"
-	"os"
-	"strings"
-	"unsafe"
-
+	"encoding/json"
 	"fmt"
-
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
+	"html/template"
+	"log"
+	"net/http"
+	"os"
+	"runtime"
+	"runtime/debug"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
-const (
-	pluginName        = "gimini-generate"
-	pluginBlurb       = "Gemini AI Image Generation"
-	pluginDescription = "Uses Google's Gemini API to generate or edit images."
-	pluginAuthor      = "Gemini Code Assist"
-	pluginCopyright   = "OpScaleHub"
-	pluginDate        = "2025"
-	pluginMenuLabel   = "Gemini Image Generator..."
-	pluginMenuPath    = "<Image>/Filters/AI Tools"
-	pluginConfigKey   = "gimini-api-key"
-	apiKeyFile        = "gimini-api-key.txt"
-)
+var tmpl = template.Must(template.ParseFiles("templates/index.html"))
 
-// Plugin constants
-const (
-	MODE_TEXT_TO_IMAGE = iota
-	MODE_IMAGE_TO_IMAGE
-)
+type Server struct {
+	startTime time.Time
+	reqTotal  uint64
 
-// Global struct to hold UI state and GIMP context
-var pluginVals struct {
-	promptText string
-	apiKey     string
-	mode       int
-	run        bool // Tracks if the user clicked "OK"
-
-	// GIMP context
-	imageID    C.gint32
-	drawableID C.gint32
+	// sliding window of per-second counts (last 60 seconds)
+	mu      sync.Mutex
+	buckets [60]uint64
+	idx     int
 }
 
-// main is required for a Go binary, but for a GIMP plugin,
-// the C functions `query` and `run` are the entry points.
-func main() {}
-
-//export query
-func query() {
-	// C strings for GIMP registration
-	cPluginName := C.CString(pluginName)
-	defer C.free(unsafe.Pointer(cPluginName))
-	cPluginBlurb := C.CString(pluginBlurb)
-	defer C.free(unsafe.Pointer(cPluginBlurb))
-	cPluginDescription := C.CString(pluginDescription)
-	defer C.free(unsafe.Pointer(cPluginDescription))
-	cPluginAuthor := C.CString(pluginAuthor)
-	defer C.free(unsafe.Pointer(cPluginAuthor))
-	cPluginCopyright := C.CString(pluginCopyright)
-	defer C.free(unsafe.Pointer(cPluginCopyright))
-	cPluginDate := C.CString(pluginDate)
-	defer C.free(unsafe.Pointer(cPluginDate))
-	cMenuLabel := C.CString(pluginMenuLabel)
-	defer C.free(unsafe.Pointer(cMenuLabel))
-	cImageTypes := C.CString("RGB*, GRAY*")
-	defer C.free(unsafe.Pointer(cImageTypes))
-	cMenuPath := C.CString(pluginMenuPath)
-	defer C.free(unsafe.Pointer(cMenuPath))
-
-	// Define the arguments for the PDB procedure
-	args := [3]C.GimpParamDef{
-		{C.GIMP_PDB_INT32, C.CString("run-mode"), C.CString("Interactive, non-interactive")},
-		{C.GIMP_PDB_IMAGE, C.CString("image"), C.CString("Input image")},
-		{C.GIMP_PDB_DRAWABLE, C.CString("drawable"), C.CString("Input drawable")},
-	}
-	// Free the C strings for args after use
-	defer func() {
-		C.free(unsafe.Pointer(args[0].name))
-		C.free(unsafe.Pointer(args[0].description))
-		C.free(unsafe.Pointer(args[1].name))
-		C.free(unsafe.Pointer(args[1].description))
-		C.free(unsafe.Pointer(args[2].name))
-		C.free(unsafe.Pointer(args[2].description))
-	}()
-
-	// Register the plugin procedure with GIMP
-	C.gimp_install_procedure(
-		cPluginName,
-		cPluginBlurb,
-		cPluginDescription,
-		cPluginAuthor,
-		cPluginCopyright,
-		cPluginDate,
-		cMenuLabel,
-		cImageTypes,
-		C.GIMP_PLUGIN,
-		3, 1, // nparams, nreturn_vals for the procedure itself
-		&args[0], nil,
-	)
-
-	// Associate the menu path with the procedure
-	C.gimp_plugin_menu_register(cPluginName, cMenuPath)
+func NewServer() *Server {
+	s := &Server{startTime: time.Now()}
+	go s.rotateLoop()
+	return s
 }
 
-//export run
-func run(name *C.gchar, nparams C.gint, param *C.GimpParam, nreturn_vals *C.gint, return_vals **C.GimpParam) {
-	// Setup return values for GIMP
-	*nreturn_vals = 1
-	paramSize := C.size_t(unsafe.Sizeof(C.GimpParam{}))
-	*return_vals = (**C.GimpParam)(C.g_slice_alloc(paramSize))
-	retParam := (*C.GimpParam)(unsafe.Pointer(*return_vals))
-	retParam.Type = C.GIMP_PDB_STATUS
-	status := C.GIMP_PDB_SUCCESS
-	retParam.data.d_status = status
-
-	// Get image and drawable IDs from GIMP
-	runMode := param[0].data.d_int32
-	pluginVals.imageID = param[1].data.d_image
-	pluginVals.drawableID = param[2].data.d_drawable
-
-	// Initialize GIMP UI
-	C.gimp_ui_init(cPluginName, C.gboolean(0))
-
-	// Create the UI dialog and check if the user clicked "OK"
-	if !createDialog() {
-		status = C.GIMP_PDB_CANCEL
-		retParam.data.d_status = status
-		return
-	}
-
-	// Show a progress bar
-	C.gimp_progress_init_printf(C.CString("Contacting Gemini API..."))
-
-	// Execute the main logic
-	err := runPluginLogic()
-	if err != nil {
-		status = C.GIMP_PDB_EXECUTION_ERROR
-		// Show an error dialog to the user
-		errorMsg := C.CString(fmt.Sprintf("GIMini Error: %v", err))
-		defer C.free(unsafe.Pointer(errorMsg))
-		C.gimp_message(errorMsg)
-	}
-
-	// End progress bar
-	C.gimp_progress_end()
-
-	// Set final status
-	retParam.data.d_status = status
-}
-
-// createDialog builds and runs the GTK dialog for the plugin.
-// It returns true if the user clicks "OK", false otherwise.
-func createDialog() bool {
-	pluginVals.run = false // Reset run state
-
-	// Create dialog
-	cDialogTitle := C.CString(pluginMenuLabel)
-	defer C.free(unsafe.Pointer(cDialogTitle))
-	dialog := C.gimp_dialog_new(cDialogTitle, C.CString(pluginName), nil, C.gboolean(0))
-
-	// Main content area
-	contentArea := C.gtk_dialog_get_content_area(GTK_DIALOG(unsafe.Pointer(dialog)))
-
-	// --- API Key Entry ---
-	apiKeyFrame := C.gtk_frame_new(C.CString("Gemini API Key"))
-	C.gtk_box_pack_start(GTK_BOX(unsafe.Pointer(contentArea)), apiKeyFrame, C.gboolean(1), C.gboolean(1), 0)
-	apiKeyEntry := C.gtk_entry_new()
-	C.gtk_container_add(GTK_CONTAINER(unsafe.Pointer(apiKeyFrame)), apiKeyEntry)
-	// Load saved API key
-	savedKey := loadAPIKey()
-	if savedKey != "" {
-		C.gtk_entry_set_text(GTK_ENTRY(unsafe.Pointer(apiKeyEntry)), C.CString(savedKey))
-	}
-
-	// --- Prompt Entry ---
-	promptFrame := C.gtk_frame_new(C.CString("Prompt"))
-	C.gtk_box_pack_start(GTK_BOX(unsafe.Pointer(contentArea)), promptFrame, C.gboolean(1), C.gboolean(1), 0)
-	scrolledWindow := C.gtk_scrolled_window_new(nil, nil)
-	C.gtk_container_add(GTK_CONTAINER(unsafe.Pointer(promptFrame)), scrolledWindow)
-	promptView := C.gtk_text_view_new()
-	C.gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(unsafe.Pointer(promptView)), C.GTK_WRAP_WORD_CHAR)
-	C.gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(unsafe.Pointer(scrolledWindow)), promptView)
-	C.gtk_widget_set_size_request(scrolledWindow, -1, 150)
-
-	// --- Mode Selection ---
-	modeFrame := C.gtk_frame_new(C.CString("Mode"))
-	C.gtk_box_pack_start(GTK_BOX(unsafe.Pointer(contentArea)), modeFrame, C.gboolean(1), C.gboolean(1), 0)
-	modeBox := C.gtk_box_new(C.GTK_ORIENTATION_VERTICAL, 6)
-	C.gtk_container_add(GTK_CONTAINER(unsafe.Pointer(modeFrame)), modeBox)
-
-	radioGen := C.gtk_radio_button_new_with_label(nil, C.CString("Generate New Image (Text-to-Image)"))
-	C.gtk_box_pack_start(GTK_BOX(unsafe.Pointer(modeBox)), radioGen, C.gboolean(1), C.gboolean(1), 0)
-	radioEdit := C.gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(unsafe.Pointer(radioGen)), C.CString("Edit Current Layer (Image-to-Image)"))
-	C.gtk_box_pack_start(GTK_BOX(unsafe.Pointer(modeBox)), radioEdit, C.gboolean(1), C.gboolean(1), 0)
-	C.gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(unsafe.Pointer(radioGen)), C.gboolean(1)) // Default to Generate
-
-	// Run the dialog
-	C.gtk_window_present(GTK_WINDOW(unsafe.Pointer(dialog)))
-	response := C.gimp_dialog_run(dialog)
-
-	if response == C.GTK_RESPONSE_OK {
-		pluginVals.run = true
-
-		// Get API Key
-		cKey := C.gtk_entry_get_text(GTK_ENTRY(unsafe.Pointer(apiKeyEntry)))
-		pluginVals.apiKey = C.GoString(cKey)
-
-		// Get Prompt
-		buffer := C.gtk_text_view_get_buffer(GTK_TEXT_VIEW(unsafe.Pointer(promptView)))
-		var start, end C.GtkTextIter
-		C.gtk_text_buffer_get_start_iter(buffer, &start)
-		C.gtk_text_buffer_get_end_iter(buffer, &end)
-		cPrompt := C.gtk_text_buffer_get_text(buffer, &start, &end, C.gboolean(0))
-		defer C.g_free(C.gpointer(cPrompt))
-		pluginVals.promptText = C.GoString(cPrompt)
-
-		// Get Mode
-		if C.gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(unsafe.Pointer(radioGen))) == C.gboolean(1) {
-			pluginVals.mode = MODE_TEXT_TO_IMAGE
-		} else {
-			pluginVals.mode = MODE_IMAGE_TO_IMAGE
-		}
-	}
-
-	C.gtk_widget_destroy(GTK_WIDGET(unsafe.Pointer(dialog)))
-	return pluginVals.run
-}
-
-// runPluginLogic is the main business logic handler.
-func runPluginLogic() error {
-	if pluginVals.promptText == "" {
-		return fmt.Errorf("prompt cannot be empty")
-	}
-	if pluginVals.apiKey == "" {
-		return fmt.Errorf("API key cannot be empty")
-	}
-
-	// Save the API key for the next session
-	saveAPIKey(pluginVals.apiKey)
-
-	log.Printf("GIMini: Mode=%d, Prompt='%s'", pluginVals.mode, pluginVals.promptText)
-
-	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(pluginVals.apiKey))
-	if err != nil {
-		return fmt.Errorf("failed to create genai client: %w", err)
-	}
-	defer client.Close()
-
-	var generatedImageBytes []byte
-
-	switch pluginVals.mode {
-	case MODE_TEXT_TO_IMAGE:
-		// TODO: Replace with a real image generation model when available.
-		// Using a text model to simulate the flow.
-		model := client.GenerativeModel("gemini-pro")
-		resp, err := model.GenerateContent(ctx, genai.Text(fmt.Sprintf("A placeholder for an image of: %s", pluginVals.promptText)))
-		if err != nil {
-			return fmt.Errorf("gemini API call failed: %w", err)
-		}
-		// This is a placeholder. A real image model would return image bytes.
-		// For now, we'll create a dummy black image.
-		log.Printf("GIMini: API response received (simulated).")
-		generatedImageBytes, err = createDummyImage()
-		if err != nil {
-			return fmt.Errorf("failed to create dummy image: %w", err)
-		}
-		_ = resp // Avoid unused variable error
-
-	case MODE_IMAGE_TO_IMAGE:
-		// This is a placeholder for the Image-to-Image logic.
-		log.Println("GIMini: Starting Image-to-Image mode.")
-
-		// 1. Get active layer as PNG bytes
-		C.gimp_progress_set_text(C.CString("Reading layer data..."))
-		inputImageBytes, err := getLayerAsPNG(pluginVals.drawableID)
-		if err != nil {
-			return fmt.Errorf("could not read layer data: %w", err)
-		}
-
-		// 2. Send to Gemini Vision model
-		C.gimp_progress_set_text(C.CString("Sending data to Gemini Vision API..."))
-		model := client.GenerativeModel("gemini-pro-vision")
-		prompt := []genai.Part{
-			genai.ImageData("png", inputImageBytes),
-			genai.Text(pluginVals.promptText),
-		}
-
-		resp, err := model.GenerateContent(ctx, prompt...)
-		if err != nil {
-			return fmt.Errorf("gemini vision API call failed: %w", err)
-		}
-
-		// 3. Process response
-		// NOTE: The Vision model currently returns text. A future image-generation
-		// model would return image data. For now, we log the text response and
-		// generate a placeholder image to prove the pipeline works.
-		log.Printf("GIMini: Vision API response received.")
-		if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
-			if textPart, ok := resp.Candidates[0].Content.Parts[0].(genai.Text); ok {
-				log.Printf("GIMini: Gemini Response: '%s'", textPart)
-			}
-		}
-
-		generatedImageBytes, err = createDummyImage() // Placeholder for actual image data
-		if err != nil {
-			return fmt.Errorf("failed to create placeholder image: %w", err)
-		}
-
-	default:
-		return fmt.Errorf("unknown mode selected")
-	}
-
-	if generatedImageBytes != nil {
-		return createLayerFromBytes(generatedImageBytes)
-	}
-
-	return nil
-}
-
-// createLayerFromBytes decodes image data and creates a new layer in GIMP.
-func createLayerFromBytes(data []byte) error {
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("failed to decode image data from API: %w", err)
-	}
-
-	bounds := img.Bounds()
-	width, height := bounds.Dx(), bounds.Dy()
-
-	// Create a new layer in GIMP
-	layerName := getLayerName(pluginVals.promptText)
-	cLayerName := C.CString(layerName)
-	defer C.free(unsafe.Pointer(cLayerName))
-
-	// Assuming RGBA for now. A real implementation needs to handle different image types.
-	newLayerID := C.gimp_layer_new(
-		pluginVals.imageID,
-		cLayerName,
-		C.gint(width),
-		C.gint(height),
-		C.GIMP_RGBA_IMAGE, // Type
-		100,               // Opacity
-		C.GIMP_NORMAL_MODE,
-	)
-
-	// Add the new layer to the image
-	C.gimp_image_insert_layer(pluginVals.imageID, newLayerID, nil, -1)
-
-	// Get the drawable and create pixel region
-	drawable := C.gimp_drawable_get(newLayerID)
-	defer C.g_object_unref(C.gpointer(drawable))
-	rgn := C.gimp_pixel_rgn_new(drawable, 0, 0, C.gint(width), C.gint(height), C.FALSE, C.TRUE)
-
-	// Prepare pixel data for GIMP (non-premultiplied RGBA)
-	bpp := 4 // bytes per pixel (RGBA)
-	stride := width * bpp
-	pixels := make([]byte, stride*height)
-
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			offset := y*stride + x*bpp
-			r, g, b, a := img.At(x+bounds.Min.X, y+bounds.Min.Y).RGBA()
-			// Convert from premultiplied Alpha to non-premultiplied
-			pixels[offset+0] = byte(r >> 8)
-			pixels[offset+1] = byte(g >> 8)
-			pixels[offset+2] = byte(b >> 8)
-			pixels[offset+3] = byte(a >> 8)
-		}
-	}
-
-	// Write the pixel data to the GIMP layer
-	destRect := C.GimpRectangle{0, 0, C.gint(width), C.gint(height)}
-	C.gimp_pixel_rgn_set_rect(rgn, (*C.guint8)(unsafe.Pointer(&pixels[0])), destRect.x, destRect.y, destRect.width, destRect.height)
-
-	// Update the drawable
-	C.gimp_drawable_flush(newLayerID)
-	C.gimp_drawable_merge_shadow(newLayerID, C.TRUE)
-	C.gimp_drawable_update(newLayerID, destRect.x, destRect.y, destRect.width, destRect.height)
-
-	return nil
-}
-
-// getLayerAsPNG reads the pixel data from a GIMP drawable and encodes it as a PNG.
-func getLayerAsPNG(drawableID C.gint32) ([]byte, error) {
-	// Get drawable properties
-	width := C.gimp_drawable_width(drawableID)
-	height := C.gimp_drawable_height(drawableID)
-	bpp := C.gimp_drawable_bpp(drawableID)
-
-	// Get the drawable and create pixel region
-	drawable := C.gimp_drawable_get(drawableID)
-	defer C.g_object_unref(C.gpointer(drawable))
-	rgn := C.gimp_pixel_rgn_new(drawable, 0, 0, width, height, C.FALSE, C.FALSE)
-	if rgn == nil {
-		return nil, fmt.Errorf("failed to create pixel region for drawable %d", drawableID)
-	}
-
-	// Prepare a Go slice to hold the pixel data
-	stride := int(width) * int(bpp)
-	pixels := make([]byte, stride*int(height))
-
-	// Read the rectangle of pixels from GIMP into our Go slice
-	C.gimp_pixel_rgn_get_rect(rgn, (*C.guint8)(unsafe.Pointer(&pixels[0])), 0, 0, width, height)
-
-	// Create a Go image.Image from the raw pixel data.
-	// GIMP provides non-premultiplied RGBA data, which matches image.RGBA.
-	var img image.Image
-	switch bpp {
-	case 4: // RGBA
-		img = &image.RGBA{
-			Pix:    pixels,
-			Stride: stride,
-			Rect:   image.Rect(0, 0, int(width), int(height)),
-		}
-	case 3: // RGB
-		img = &image.NRGBA{ // Use NRGBA and manually copy to handle 3-byte stride
-			Pix:    make([]byte, int(width)*int(height)*4),
-			Stride: int(width) * 4,
-			Rect:   image.Rect(0, 0, int(width), int(height)),
-		}
-		// Manually copy RGB to RGBA with full alpha
-		for y := 0; y < int(height); y++ {
-			for x := 0; x < int(width); x++ {
-				srcOff := y*stride + x*3
-				dstOff := y*img.(*image.NRGBA).Stride + x*4
-				copy(img.(*image.NRGBA).Pix[dstOff:dstOff+3], pixels[srcOff:srcOff+3])
-				img.(*image.NRGBA).Pix[dstOff+3] = 255 // Opaque Alpha
-			}
-		}
-	default:
-		return nil, fmt.Errorf("unsupported bytes-per-pixel: %d", bpp)
-	}
-
-	// Encode the image.Image to a PNG byte buffer
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, fmt.Errorf("failed to encode layer to PNG: %w", err)
-	}
-
-	log.Printf("GIMini: Successfully encoded layer (%dx%d, %d bpp) to PNG.", width, height, bpp)
-	return buf.Bytes(), nil
-}
-
-// --- Helper Functions ---
-
-func saveAPIKey(key string) {
-	if err := os.WriteFile(apiKeyFile, []byte(key), 0600); err != nil {
-		log.Printf("Failed to save API key: %v", err)
+func (s *Server) rotateLoop() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.mu.Lock()
+		s.idx = (s.idx + 1) % len(s.buckets)
+		s.buckets[s.idx] = 0
+		s.mu.Unlock()
 	}
 }
 
-func loadAPIKey() string {
-	data, err := os.ReadFile(apiKeyFile)
-	if err != nil {
-		return ""
-	}
-	return string(data)
+func (s *Server) recordRequest() {
+	atomic.AddUint64(&s.reqTotal, 1)
+	s.mu.Lock()
+	s.buckets[s.idx]++
+	s.mu.Unlock()
 }
 
-func getLayerName(prompt string) string {
-	words := strings.Fields(prompt)
-	maxWords := 5
-	if len(words) < maxWords {
-		maxWords = len(words)
+func (s *Server) requestsPerMinute() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var sum uint64
+	for _, v := range s.buckets {
+		sum += v
 	}
-	shortPrompt := strings.Join(words[:maxWords], " ")
-	return fmt.Sprintf("Gemini Gen: %s...", shortPrompt)
+	return sum
 }
 
-// createDummyImage creates a 512x512 black PNG for placeholder use.
-func createDummyImage() ([]byte, error) {
-	img := image.NewRGBA(image.Rect(0, 0, 512, 512))
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, err
+func (s *Server) dashboardHandler(w http.ResponseWriter, r *http.Request) {
+	s.recordRequest()
+
+	hostname, _ := os.Hostname()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	// copy buckets under lock and compute bar heights for the template
+	s.mu.Lock()
+	buckets := make([]uint64, len(s.buckets))
+	copy(buckets, s.buckets[:])
+	s.mu.Unlock()
+
+	// compute heights (pixels) for a small sparkline; cap to 120px
+	heights := make([]int, len(buckets))
+	max := uint64(1)
+	for _, v := range buckets {
+		if v > max {
+			max = v
+		}
 	}
-	return buf.Bytes(), nil
+	scale := 1.0
+	if max > 0 {
+		// scale to max 120px
+		scale = 120.0 / float64(max)
+	}
+	for i, v := range buckets {
+		h := int(float64(v) * scale)
+		if h < 2 {
+			h = 2
+		}
+		heights[i] = h
+	}
+
+	data := map[string]interface{}{
+		"StartTime":      s.startTime.Format(time.RFC3339),
+		"Uptime":         time.Since(s.startTime).Truncate(time.Second).String(),
+		"RequestsTotal":  atomic.LoadUint64(&s.reqTotal),
+		"RequestsPerMin": s.requestsPerMinute(),
+		"Hostname":       hostname,
+		"GoVersion":      runtime.Version(),
+		"NumGoroutine":   runtime.NumGoroutine(),
+		"MemAllocMB":     float64(m.Alloc) / 1024.0 / 1024.0,
+		"BarHeights":     heights,
+	}
+
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
-// Cgo requires some type casting that is verbose. These helpers make it cleaner.
-func GTK_BOX(p unsafe.Pointer) *C.GtkBox                        { return (*C.GtkBox)(p) }
-func GTK_FRAME(p unsafe.Pointer) *C.GtkFrame                    { return (*C.GtkFrame)(p) }
-func GTK_ENTRY(p unsafe.Pointer) *C.GtkEntry                    { return (*C.GtkEntry)(p) }
-func GTK_TEXT_VIEW(p unsafe.Pointer) *C.GtkTextView             { return (*C.GtkTextView)(p) }
-func GTK_SCROLLED_WINDOW(p unsafe.Pointer) *C.GtkScrolledWindow { return (*C.GtkScrolledWindow)(p) }
-func GTK_CHECK_BUTTON(p unsafe.Pointer) *C.GtkCheckButton       { return (*C.GtkCheckButton)(p) }
-func GTK_WINDOW(p unsafe.Pointer) *C.GtkWindow                  { return (*C.GtkWindow)(p) }
-func GTK_DIALOG(p unsafe.Pointer) *C.GtkDialog                  { return (*C.GtkDialog)(p) }
-func GTK_WIDGET(p unsafe.Pointer) *C.GtkWidget                  { return (*C.GtkWidget)(p) }
-func GTK_CONTAINER(p unsafe.Pointer) *C.GtkContainer            { return (*C.GtkContainer)(p) }
-func GTK_TOGGLE_BUTTON(p unsafe.Pointer) *C.GtkToggleButton     { return (*C.GtkToggleButton)(p) }
-func GTK_RADIO_BUTTON(p unsafe.Pointer) *C.GtkRadioButton       { return (*C.GtkRadioButton)(p) }
-
-func init() {
-	// Configure logging to a file for debugging GIMP plugins
-	f, err := os.OpenFile("gimini-debug.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("error opening file: %v", err)
+func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
+	s.recordRequest()
+	w.Header().Set("Content-Type", "application/json")
+	out := map[string]string{
+		"status": "ok",
+		"uptime": time.Since(s.startTime).Truncate(time.Second).String(),
 	}
-	log.SetOutput(f)
-	log.Println("GIMini plugin initialized")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	s.recordRequest()
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	uptime := time.Since(s.startTime).Seconds()
+	fmt.Fprintf(w, "uptime_seconds %d\n", int64(uptime))
+	fmt.Fprintf(w, "requests_total %d\n", atomic.LoadUint64(&s.reqTotal))
+	fmt.Fprintf(w, "requests_per_min %d\n", s.requestsPerMinute())
+}
+
+func main() {
+	// If built with modules that disable symbol table info, enable it for stack traces.
+	_ = debug.SetGCPercent(100)
+
+	port := 8080
+	if p := os.Getenv("PORT"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil {
+			port = v
+		}
+	}
+
+	srv := NewServer()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", srv.dashboardHandler)
+	mux.HandleFunc("/health", srv.healthHandler)
+	mux.HandleFunc("/metrics", srv.metricsHandler)
+
+	// serve static assets
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	addr := fmt.Sprintf(":%d", port)
+	log.Printf("starting deepSight on %s\n", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Fatalf("server failed: %v", err)
+	}
 }

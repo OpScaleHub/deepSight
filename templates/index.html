@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>deepSight — Uptime Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* small in-template fallback styles */
+    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#0f1724; color:#e6eef8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>deepSight</h1>
+      <p class="muted">simple uptime & runtime dashboard</p>
+    </header>
+
+    <section class="grid">
+      <div class="card">
+        <h3>Uptime</h3>
+        <div class="big">{{ .Uptime }}</div>
+        <div class="muted">Started: {{ .StartTime }}</div>
+      </div>
+
+      <div class="card">
+        <h3>Requests</h3>
+        <div class="big">{{ .RequestsTotal }}</div>
+        <div class="muted">Last 60s: {{ .RequestsPerMin }}</div>
+      </div>
+
+      <div class="card">
+        <h3>Host</h3>
+        <div class="muted">{{ .Hostname }}</div>
+        <div class="muted">Go: {{ .GoVersion }} • Goroutines: {{ .NumGoroutine }}</div>
+      </div>
+
+      <div class="card">
+        <h3>Memory</h3>
+        <div class="big">{{ printf "%.2f" .MemAllocMB }} MiB</div>
+      </div>
+    </section>
+
+    <section class="chart card">
+      <h3>Requests (last 60s)</h3>
+      <div class="sparkline">
+        {{ range .BarHeights }}
+          <div class="bar" style="height:{{ . }}px" title="{{ . }}"></div>
+        {{ end }}
+      </div>
+    </section>
+
+    <footer class="muted">/health • /metrics • container-ready for k8s</footer>
+  </div>
+
+</body>
+</html>

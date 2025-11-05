@@ -18,10 +18,15 @@ FROM alpine:latest
 
 WORKDIR /root/
 
-# Copy the app binary from the builder stage.
-COPY --from=builder /app/main .
+# Install certificates (if your app makes outbound TLS calls)
+RUN apk add --no-cache ca-certificates
 
-# Expose port if needed (replace 8080 with your app's port)
+# Copy the app binary and static assets from the builder stage.
+COPY --from=builder /app/main .
+COPY --from=builder /app/templates ./templates
+COPY --from=builder /app/static ./static
+
+# Expose port
 EXPOSE 8080
 
 # Run the Go binary
