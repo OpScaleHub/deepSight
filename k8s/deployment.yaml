@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: deepsight
-        image: opscale/deepsight:latest
+        image: ghcr.op/opscalehub/deepsight:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
