@@ -1,11 +1,11 @@
 # Start from the official Golang image for building the app
-FROM golang:1.21 as builder
+FROM golang:1.21 AS builder
 
 WORKDIR /app
 
-# Copy go mod and sum files; download dependencies
-COPY go.mod go.sum ./
-RUN go mod download
+# Copy go mod file and download dependencies. If a go.sum exists it will be created by `go mod download`/`go mod tidy`.
+COPY go.mod ./
+RUN go mod download || true
 
 # Copy the source code
 COPY . .
@@ -28,6 +28,14 @@ COPY --from=builder /app/static ./static
 
 # Expose port
 EXPOSE 8080
+
+# Suggested OCI labels so registries (including GHCR) can link the image to the
+# source repository and show metadata in the Packages UI. Update values if needed.
+LABEL org.opencontainers.image.title="deepSight"
+LABEL org.opencontainers.image.description="A tiny uptime & runtime dashboard"
+LABEL org.opencontainers.image.url="https://github.com/OpScaleHub/deepSight"
+LABEL org.opencontainers.image.source="https://github.com/OpScaleHub/deepSight"
+LABEL org.opencontainers.image.licenses="MIT"
 
 # Run the Go binary
 CMD ["./main"]

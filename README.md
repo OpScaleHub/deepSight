@@ -20,7 +20,7 @@ PORT=8080 ./deepsight
 Build Docker image:
 
 ```bash
-docker build -t opscale/deepsight:latest .
+docker build -t ghcr.io/opscalehub/deepsight/workload:latest .
 ```
 
 Push to registry and update image in `k8s/deployment.yaml`.
