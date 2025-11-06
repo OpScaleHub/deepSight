@@ -12,7 +12,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # IMAGE_NAME will be computed at runtime (lowercased) and exported to GITHUB_ENV
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,13 +32,10 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Set image name
-        run: |
-          # compute lowercase owner and set IMAGE_NAME for subsequent steps
-          OWNER="${{ github.repository_owner }}"
-          OWNER_LOWER=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
-          echo "IMAGE_NAME=ghcr.io/${OWNER_LOWER}/deepsight/workload" >> $GITHUB_ENV
-
-      # IMAGE_NAME is set at the job level in `env:` so it is available as ${ { env.IMAGE_NAME } }
+        env:
+          # Define the base image name. It will be converted to lowercase.
+          RAW_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/deepsight/workload
+        run: echo "IMAGE_NAME=$(echo ${{ env.RAW_IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -48,31 +44,16 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push multi-arch image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.tag_version.outputs.new_tag }}
-            ${{ env.IMAGE_NAME }}:latest
+      - name: Build and push multi-arch image via Makefile
+        run: |
+          make docker-buildx IMG=${{ env.IMAGE_NAME }}:${{ steps.tag_version.outputs.new_tag }} PLATFORMS=linux/amd64,linux/arm64
+
+      - name: Push 'latest' tag
+        run: |
+          docker buildx imagetools create --tag ${{ env.IMAGE_NAME }}:latest ${{ env.IMAGE_NAME }}:${{ steps.tag_version.outputs.new_tag }}
 
       - name: Generate single install manifest
-        run: |
-          set -eux
-          mkdir -p dist
-          # Use :latest in the generated install manifest so cluster installs pull the latest image
-          # (the workflow also pushes the specific tag for reproducibility).
-          TAG=${{ steps.tag_version.outputs.new_tag }}
-          IMAGE=${{ env.IMAGE_NAME }}:latest
-          # Replace 'image:' value in k8s/deployment.yaml with the published image:tag
-          sed -E "s|(^[[:space:]]*image:).*|\1 ${IMAGE}|" k8s/deployment.yaml > dist/deployment.yaml
-          # Combine deployment + service into a single install manifest
-          # use escaped bytes to avoid placing literal '---' in this YAML file (some linters
-          # treat that as a document separator in the workflow file). This still writes a
-          # proper '---' separator into dist/install.yaml at runtime.
-          printf "%s\n%b\n%s\n" "$(cat dist/deployment.yaml)" "\\x2d\\x2d\\x2d" "$(cat k8s/service.yaml)" > dist/install.yaml
+        run: cat k8s/*.yaml >dist/install.yaml
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
