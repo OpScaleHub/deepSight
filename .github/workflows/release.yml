@@ -12,9 +12,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      # ensure lowercase owner (docker requires lowercase repository names)
-      IMAGE_NAME: ghcr.io/${{ toLower(github.repository_owner) }}/deepsight/workload
+    # IMAGE_NAME will be computed at runtime (lowercased) and exported to GITHUB_ENV
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,6 +31,13 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Set image name
+        run: |
+          # compute lowercase owner and set IMAGE_NAME for subsequent steps
+          OWNER="${{ github.repository_owner }}"
+          OWNER_LOWER=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=ghcr.io/${OWNER_LOWER}/deepsight/workload" >> $GITHUB_ENV
 
       # IMAGE_NAME is set at the job level in `env:` so it is available as ${ { env.IMAGE_NAME } }
 
