@@ -44,13 +44,15 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push multi-arch image via Makefile
-        run: |
-          make docker-buildx IMG=${{ env.IMAGE_NAME }}:${{ steps.tag_version.outputs.new_tag }} PLATFORMS=linux/amd64,linux/arm64
-
-      - name: Push 'latest' tag
-        run: |
-          docker buildx imagetools create --tag ${{ env.IMAGE_NAME }}:latest ${{ env.IMAGE_NAME }}:${{ steps.tag_version.outputs.new_tag }}
+      - name: Build and push amd64 image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.tag_version.outputs.new_tag }}
+            ${{ env.IMAGE_NAME }}:latest
 
       - name: Generate single install manifest
         run: cat k8s/*.yaml >dist/install.yaml
