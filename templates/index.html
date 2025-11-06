@@ -51,6 +51,21 @@
       </div>
     </section>
 
+    <section class="card client">
+      <h3>Client</h3>
+      <div class="muted small">{{ .ClientIP }} • <strong>{{ .ClientMethod }}</strong> {{ .ClientPath }}</div>
+      <div class="muted small">UA: {{ .ClientUA }}</div>
+
+      <details class="muted headers" style="margin-top:8px">
+        <summary class="muted">Show headers</summary>
+        <ul>
+          {{ range $k, $v := .ClientHeaders }}
+            <li><strong>{{ $k }}:</strong> {{ $v }}</li>
+          {{ end }}
+        </ul>
+      </details>
+    </section>
+
     <footer class="muted">/health • /metrics • container-ready for k8s</footer>
   </div>
 

@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -95,6 +97,31 @@ func (s *Server) dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		heights[i] = h
 	}
 
+	// client info (respect X-Forwarded-For / X-Real-IP when behind proxies/ingress)
+	clientIP := func(r *http.Request) string {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			return strings.TrimSpace(parts[0])
+		}
+		if xr := r.Header.Get("X-Real-IP"); xr != "" {
+			return xr
+		}
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			return r.RemoteAddr
+		}
+		return host
+	}(r)
+
+	// capture a small set of headers to show (omit sensitive ones)
+	hdrs := map[string]string{}
+	allowed := []string{"Host", "User-Agent", "Accept", "Accept-Language", "Referer", "X-Forwarded-For", "X-Real-IP"}
+	for _, k := range allowed {
+		if v := r.Header.Get(k); v != "" {
+			hdrs[k] = v
+		}
+	}
+
 	data := map[string]interface{}{
 		"StartTime":      s.startTime.Format(time.RFC3339),
 		"Uptime":         time.Since(s.startTime).Truncate(time.Second).String(),
@@ -105,6 +132,12 @@ func (s *Server) dashboardHandler(w http.ResponseWriter, r *http.Request) {
 		"NumGoroutine":   runtime.NumGoroutine(),
 		"MemAllocMB":     float64(m.Alloc) / 1024.0 / 1024.0,
 		"BarHeights":     heights,
+		// client/request info for the dashboard
+		"ClientIP":      clientIP,
+		"ClientMethod":  r.Method,
+		"ClientPath":    r.URL.Path,
+		"ClientUA":      r.UserAgent(),
+		"ClientHeaders": hdrs,
 	}
 
 	if err := tmpl.Execute(w, data); err != nil {

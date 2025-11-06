@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>deepSight — uptime dashboard</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <h1>deepSight</h1>
+      <p class="tagline">A minimal, luxury uptime & runtime dashboard for containers and Kubernetes</p>
+    </header>
+
+    <section class="card">
+      <h2>Overview</h2>
+      <p>deepSight is a tiny Go web app that exposes a simple dashboard (<span class="mono">/</span>), a health endpoint (<span class="mono">/health</span>) and lightweight metrics (<span class="mono">/metrics</span>). It is designed to be container-first and run in Kubernetes.</p>
+    </section>
+
+    <section class="card two">
+      <div>
+        <h3>Quick demo</h3>
+        <p>Run locally:</p>
+        <pre class="cmd">go build -o deepsight .
+PORT=8080 ./deepsight</pre>
+        <p>Open <a href="/">http://localhost:8080/</a></p>
+      </div>
+
+      <div>
+        <h3>Container</h3>
+        <p>Build & push (GitHub Actions already does this on release):</p>
+        <pre class="cmd">docker build -t ghcr.io/opscalehub/deepsight/workload:latest .
+docker push ghcr.io/opscalehub/deepsight/workload:latest</pre>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Deploy to Kubernetes (public repo)</h2>
+      <p>If this repository is public, the release workflow will attach a combined install manifest. You can install the latest release directly:</p>
+      <pre class="cmd">kubectl apply -f https://github.com/OpScaleHub/deepSight/releases/latest/download/dist/install.yaml</pre>
+
+      <p>Or, to inspect before applying:</p>
+      <pre class="cmd">curl -L -o install.yaml https://github.com/OpScaleHub/deepSight/releases/latest/download/dist/install.yaml
+kubectl apply -f install.yaml</pre>
+
+      <p>If you prefer a pinned, reproducible install, download the release artifact for the specific tag from the Releases page and apply that file instead.</p>
+    </section>
+
+    <section class="card">
+      <h2>Advanced</h2>
+      <ul>
+        <li>Probes: readiness & liveness use <span class="mono">/health</span>.</li>
+        <li>Metrics at <span class="mono">/metrics</span> are Prometheus‑friendly. You can scrape them.</li>
+        <li>Behind proxies/ingress the app respects <span class="mono">X-Forwarded-For</span> and <span class="mono">X-Real-IP</span> for client IP display.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>GitHub Pages</h2>
+      <p>This site is served from the <code>docs/</code> folder. To enable Pages for this repository:
+      <ol>
+        <li>Go to Settings → Pages</li>
+        <li>Set Source to <strong>Deploy from a branch</strong> and pick <code>main</code> / <code>/docs</code></li>
+        <li>Save — your site will be published at <code>https://opscalehub.github.io/deepSight/</code> (or similar)</li>
+      </ol>
+      </p>
+    </section>
+
+    <footer>
+      <p>See the <a href="../README.md">README</a> and the <a href="../.github/workflows/release.yml">release workflow</a> for CI/CD details.</p>
+    </footer>
+  </main>
+</body>
+</html>
