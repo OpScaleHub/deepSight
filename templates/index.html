@@ -69,6 +69,31 @@
     <footer class="muted">/health • /metrics • container-ready for k8s</footer>
   </div>
 
+  <section class="container interactive" style="max-width:900px;margin:20px auto;">
+    <div class="card">
+      <h3>Interactive tools</h3>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <button id="btn-metrics">Refresh /metrics</button>
+        <button id="btn-version">Get /version</button>
+  <!-- /env removed -->
+        <button id="btn-ready">Check /ready</button>
+        <button id="btn-toggle-ready">Toggle readiness</button>
+        <a class="muted" href="/debug/pprof/" target="_blank">pprof</a>
+      </div>
+
+      <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <pre id="out-metrics" style="white-space:pre-wrap;word-break:break-word;background:#071025;padding:8px;border-radius:6px;min-height:60px">/metrics output</pre>
+        <pre id="out-version" style="white-space:pre-wrap;word-break:break-word;background:#071025;padding:8px;border-radius:6px;min-height:60px">/version output</pre>
+  <!-- /env output omitted -->
+        <pre id="out-ready" style="white-space:pre-wrap;word-break:break-word;background:#071025;padding:8px;border-radius:6px;min-height:60px">/ready output</pre>
+      </div>
+
+      <hr style="border-color:#16324a;margin:12px 0">
+
+      <!-- Echo UI removed (endpoint disabled) -->
+    </div>
+  </section>
+
   <script>
     // set bar heights client-side to avoid template braces inside inline CSS
     (function(){
@@ -82,6 +107,36 @@
         // noop
       }
     })();
+
+    // small helper to fetch and show JSON/text
+    async function fetchText(path, targetEl){
+      try{
+        const res = await fetch(path);
+        const txt = await res.text();
+        document.getElementById(targetEl).textContent = txt;
+      }catch(e){
+        document.getElementById(targetEl).textContent = String(e);
+      }
+    }
+
+    document.getElementById('btn-metrics').addEventListener('click', function(){ fetchText('/metrics','out-metrics'); });
+    document.getElementById('btn-version').addEventListener('click', function(){ fetchText('/version','out-version'); });
+  // /env button removed — not available for security
+    document.getElementById('btn-ready').addEventListener('click', function(){ fetchText('/ready','out-ready'); });
+    document.getElementById('btn-toggle-ready').addEventListener('click', async function(){
+      try{
+        // flip readiness
+        const res = await fetch('/toggle-ready');
+        const j = await res.json();
+        document.getElementById('out-ready').textContent = JSON.stringify(j, null, 2);
+      }catch(e){ document.getElementById('out-ready').textContent = String(e); }
+    });
+
+    // Echo UI removed; no client-side echo handler
+
+    // initial warm fetches
+    fetchText('/metrics','out-metrics');
+    fetchText('/version','out-version');
   </script>
 
 </body>

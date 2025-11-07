@@ -1,27 +1,34 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
 var tmpl = template.Must(template.ParseFiles("templates/index.html"))
 
+// Server holds runtime state and simple in-memory metrics
 type Server struct {
 	startTime time.Time
 	reqTotal  uint64
+	// last request duration in ms
+	lastReqMs int64
 
 	// sliding window of per-second counts (last 60 seconds)
 	mu      sync.Mutex
@@ -145,6 +152,75 @@ func (s *Server) dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// (env endpoint removed — sensitive envs are not exposed via HTTP)
+
+// Echo endpoint removed (no longer exposed in UI)
+
+func (s *Server) versionHandler(w http.ResponseWriter, r *http.Request) {
+	s.recordRequest()
+	info := map[string]interface{}{
+		"go_version": runtime.Version(),
+		"start_time": s.startTime.Format(time.RFC3339),
+	}
+	if v := os.Getenv("VERSION"); v != "" {
+		info["version"] = v
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi != nil {
+		info["module"] = bi.Main.Path
+		info["module_version"] = bi.Main.Version
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(info)
+}
+
+// env endpoint intentionally omitted
+
+// readiness state toggled via /toggle-ready (for testing)
+var readyFlag int32 = 1
+
+func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
+	s.recordRequest()
+	// allow simulated delay or status via query params
+	if d := r.URL.Query().Get("delay"); d != "" {
+		if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
+			time.Sleep(time.Duration(ms) * time.Millisecond)
+		}
+	}
+	if st := r.URL.Query().Get("status"); st != "" {
+		if code, err := strconv.Atoi(st); err == nil {
+			http.Error(w, http.StatusText(code), code)
+			return
+		}
+	}
+
+	if atomic.LoadInt32(&readyFlag) == 1 {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+		return
+	}
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "not ready"})
+}
+
+func (s *Server) toggleReadyHandler(w http.ResponseWriter, r *http.Request) {
+	s.recordRequest()
+	q := r.URL.Query().Get("set")
+	if q == "true" || q == "1" || strings.ToLower(q) == "on" {
+		atomic.StoreInt32(&readyFlag, 1)
+	} else if q == "false" || q == "0" || strings.ToLower(q) == "off" {
+		atomic.StoreInt32(&readyFlag, 0)
+	} else {
+		// flip
+		if atomic.LoadInt32(&readyFlag) == 1 {
+			atomic.StoreInt32(&readyFlag, 0)
+		} else {
+			atomic.StoreInt32(&readyFlag, 1)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ready": atomic.LoadInt32(&readyFlag) == 1})
+}
+
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	s.recordRequest()
 	w.Header().Set("Content-Type", "application/json")
@@ -162,6 +238,8 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "uptime_seconds %d\n", int64(uptime))
 	fmt.Fprintf(w, "requests_total %d\n", atomic.LoadUint64(&s.reqTotal))
 	fmt.Fprintf(w, "requests_per_min %d\n", s.requestsPerMinute())
+	fmt.Fprintf(w, "last_request_ms %d\n", atomic.LoadInt64(&s.lastReqMs))
+	fmt.Fprintf(w, "goroutines %d\n", runtime.NumGoroutine())
 }
 
 func main() {
@@ -181,13 +259,43 @@ func main() {
 	mux.HandleFunc("/", srv.dashboardHandler)
 	mux.HandleFunc("/health", srv.healthHandler)
 	mux.HandleFunc("/metrics", srv.metricsHandler)
+	mux.HandleFunc("/ready", srv.readyHandler)
+	mux.HandleFunc("/toggle-ready", srv.toggleReadyHandler)
+	mux.HandleFunc("/version", srv.versionHandler)
+
+	// pprof endpoints (useful for debugging)
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	// serve static assets
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
 	addr := fmt.Sprintf(":%d", port)
-	log.Printf("starting deepSight on %s\n", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("server failed: %v", err)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: mux,
 	}
+
+	// graceful shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("starting deepSight on %s\n", addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server failed: %v", err)
+		}
+	}()
+
+	<-stop
+	log.Printf("shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("graceful shutdown failed: %v", err)
+	}
+	log.Printf("server stopped")
 }
