@@ -3,35 +3,55 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>deepSight — uptime dashboard</title>
+  <title>deepSight — Elegant Runtime Dashboard</title>
   <link rel="stylesheet" href="./style.css">
+  <meta name="description" content="A minimal, luxury uptime & runtime dashboard for containers and Kubernetes">
+  <link rel="canonical" href="https://deepsight.opscale.ir/">
 </head>
 <body>
   <main class="wrap">
     <header>
       <h1>deepSight</h1>
       <p class="tagline">A minimal, luxury uptime & runtime dashboard for containers and Kubernetes</p>
+      <div class="badges">
+        <a href="https://github.com/OpScaleHub/deepSight/releases"><img src="https://img.shields.io/github/v/release/OpScaleHub/deepSight?style=flat-square" alt="Latest Release"></a>
+        <a href="https://github.com/OpScaleHub/deepSight/blob/main/LICENSE"><img src="https://img.shields.io/github/license/OpScaleHub/deepSight?style=flat-square" alt="License"></a>
+      </div>
     </header>
 
-    <section class="card">
+    <section class="hero">
+      <div class="screenshot">
+        <img src="screenshot.png" alt="deepSight dashboard showing uptime, requests, and system metrics" loading="lazy">
+      </div>
+      <p class="caption">Elegant, focused, and container-ready runtime insights</p>
+    </section>
+
+    <section class="card overview">
       <h2>Overview</h2>
-      <p>deepSight is a tiny Go web app that exposes a simple dashboard (<span class="mono">/</span>), a health endpoint (<span class="mono">/health</span>) and lightweight metrics (<span class="mono">/metrics</span>). It is designed to be container-first and run in Kubernetes.</p>
+      <p>deepSight is a tiny Go web app that exposes a beautifully designed dashboard and powerful runtime introspection tools. Built for containers and Kubernetes, it provides:</p>
+      <ul class="features">
+        <li>Clean, information-dense dashboard at <span class="mono">/</span></li>
+        <li>Prometheus-compatible metrics at <span class="mono">/metrics</span></li>
+        <li>Smart health probes via <span class="mono">/health</span> and <span class="mono">/ready</span></li>
+        <li>Interactive state toggling and version info</li>
+        <li>Advanced profiling via pprof endpoints</li>
+      </ul>
     </section>
 
     <section class="card two">
       <div>
-        <h3>Quick demo</h3>
-        <p>Run locally:</p>
+        <h3>⚡️ Quick Start</h3>
+        <p>Run locally with Go:</p>
         <pre class="cmd">go build -o deepsight .
 PORT=8080 ./deepsight</pre>
-        <p>Open <a href="/">http://localhost:8080/</a></p>
+        <p>Visit <a href="http://localhost:8080">localhost:8080</a> to see your dashboard</p>
       </div>
 
       <div>
-        <h3>Container</h3>
-        <p>Build & push (GitHub Actions already does this on release):</p>
-        <pre class="cmd">docker build -t ghcr.io/opscalehub/deepsight/workload:latest .
-docker push ghcr.io/opscalehub/deepsight/workload:latest</pre>
+        <h3>🐳 Container</h3>
+        <p>Pull and run the latest release:</p>
+        <pre class="cmd">docker run -p 8080:8080 \
+  ghcr.io/opscalehub/deepsight/workload:latest</pre>
       </div>
     </section>
 
@@ -48,27 +68,27 @@ kubectl apply -f install.yaml</pre>
     </section>
 
     <section class="card">
-      <h2>Advanced</h2>
-      <ul>
-        <li>Probes: readiness & liveness use <span class="mono">/health</span>.</li>
-        <li>Metrics at <span class="mono">/metrics</span> are Prometheus‑friendly. You can scrape them.</li>
-        <li>Behind proxies/ingress the app respects <span class="mono">X-Forwarded-For</span> and <span class="mono">X-Real-IP</span> for client IP display.</li>
-      </ul>
-    </section>
-
-    <section class="card">
-      <h2>GitHub Pages</h2>
-      <p>This site is served from the <code>docs/</code> folder. To enable Pages for this repository:
-      <ol>
-        <li>Go to Settings → Pages</li>
-        <li>Set Source to <strong>Deploy from a branch</strong> and pick <code>main</code> / <code>/docs</code></li>
-        <li>Save — your site will be published at <code>https://opscalehub.github.io/deepSight/</code> (or similar)</li>
-      </ol>
+      <h2>Advanced Features</h2>
+      <div class="features">
+        <li><span class="mono">/health</span> — Liveness probe endpoint</li>
+        <li><span class="mono">/ready</span> — Readiness state (configurable)</li>
+        <li><span class="mono">/metrics</span> — Prometheus metrics</li>
+        <li><span class="mono">/version</span> — Build and runtime info</li>
+        <li><span class="mono">/toggle-ready</span> — Flip readiness</li>
+        <li><span class="mono">/debug/pprof/*</span> — Go profiling</li>
+      </div>
+      <p class="muted" style="margin-top:12px">
+        The app respects <span class="mono">X-Forwarded-For</span> and <span class="mono">X-Real-IP</span> headers behind proxies/ingress.
+        All endpoints return appropriate status codes and content types for monitoring integration.
       </p>
     </section>
 
     <footer>
-      <p>See the <a href="../README.md">README</a> and the <a href="../.github/workflows/release.yml">release workflow</a> for CI/CD details.</p>
+      <p class="muted">
+        <a href="https://github.com/OpScaleHub/deepSight">GitHub</a>
+        • <a href="https://github.com/OpScaleHub/deepSight/releases">Releases</a>
+        • <a href="https://github.com/OpScaleHub/deepSight/blob/main/LICENSE">License</a>
+      </p>
     </footer>
   </main>
 </body>

@@ -1,12 +1,27 @@
 :root{--bg:#0f1724;--card:#0b1220;--accent:#7c3aed;--muted:#9fb0c8;--text:#e6eef8}
 body{margin:0;padding:28px;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
 .wrap{max-width:980px;margin:0 auto}
-header{display:block;margin-bottom:18px}
-header h1{margin:0;font-size:2rem}
-.tagline{color:var(--muted);margin-top:6px}
+header{display:block;margin-bottom:28px;text-align:center}
+header h1{margin:0;font-size:2.5rem;background:linear-gradient(135deg,var(--accent),#4f46e5);-webkit-background-clip:text;background-clip:text;color:transparent}
+.tagline{color:var(--muted);margin:8px 0 12px;font-size:1.1rem}
+.badges{display:flex;gap:8px;justify-content:center}
+.badges img{height:20px}
+.hero{margin:0 -28px 28px;text-align:center}
+.screenshot{margin:0 auto;max-width:980px;padding:0 28px}
+.screenshot img{width:100%;height:auto;border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,0.3)}
+.caption{color:var(--muted);text-align:center;margin:12px 0 0}
 .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);padding:18px;border-radius:10px;margin-bottom:14px}
 .card.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 .mono{font-family:ui-monospace,Menlo,monospace;background:rgba(255,255,255,0.02);padding:2px 6px;border-radius:4px}
 .cmd{background:#07111a;padding:10px;border-radius:6px;color:#cfe6ff;overflow:auto}
 footer{color:var(--muted);margin-top:12px}
 @media(max-width:720px){.card.two{grid-template-columns:1fr}}
+.features{list-style:none;padding:0;margin:12px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.features li{background:rgba(255,255,255,0.02);padding:12px;border-radius:8px;display:flex;align-items:center;gap:8px}
+.features li::before{content:"";display:inline-block;width:6px;height:6px;background:var(--accent);border-radius:50%}
+.overview{background:linear-gradient(135deg,rgba(124,58,237,0.1),rgba(79,70,229,0.05))}
+.overview h2{margin-top:0}
+h2{font-size:1.4rem;margin:0 0 12px;color:var(--text)}
+h3{font-size:1.2rem;margin:0 0 10px;color:var(--text)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
