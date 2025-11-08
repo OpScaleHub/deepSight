@@ -15,12 +15,18 @@ env:
   # github.repository always resolves to <owner>/<repo>
   # Push images under a named package 'workload' (matches existing manual pushes)
   # Resulting image: ${{ env.REGISTRY }}/${{ github.repository }}/workload
+  # Push images under a named package 'workload' (matches existing manual pushes)
+  # Resulting image: ${{ env.REGISTRY }}/${{ github.repository }}/workload
   IMAGE_NAME: ${{ github.repository }}/workload
 
 jobs:
   build:
 
     runs-on: ubuntu-latest
+
+    # If you want to use a PAT instead of GITHUB_TOKEN, add a repo secret named GHCR_TOKEN
+    env:
+      GHCR_PASSWORD: ${{ secrets.GHCR_TOKEN }}
 
     permissions:
       contents: read
@@ -49,7 +55,8 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer a PAT stored in GHCR_TOKEN; fall back to the runtime GITHUB_TOKEN
+          password: ${{ env.GHCR_PASSWORD || secrets.GITHUB_TOKEN }}
 
       # Extract Docker image metadata (tags, labels)
       - name: Extract Docker metadata
