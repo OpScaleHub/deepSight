@@ -19,19 +19,19 @@ env:
   # Resulting image: ${{ env.REGISTRY }}/${{ github.repository }}/workload
   IMAGE_NAME: ${{ github.repository }}/workload
 
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
 jobs:
   build:
 
     runs-on: ubuntu-latest
 
-    # If you want to use a PAT instead of GITHUB_TOKEN, add a repo secret named GHCR_TOKEN
-    env:
-      GHCR_PASSWORD: ${{ secrets.GHCR_TOKEN }}
-
-    permissions:
-      contents: read
-      packages: write         # << REQUIRED for publishing to GHCR
-      id-token: write         # (required for sigstore/cosign if using signing)
+    # Use the built-in GITHUB_TOKEN (no PAT required). If GITHUB_TOKEN still can't write
+    # packages, check repository/org Actions settings (see next steps below).
+    env: {}
 
     steps:
       - name: Checkout repository
@@ -55,8 +55,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          # Prefer a PAT stored in GHCR_TOKEN; fall back to the runtime GITHUB_TOKEN
-          password: ${{ env.GHCR_PASSWORD || secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # Extract Docker image metadata (tags, labels)
       - name: Extract Docker metadata
