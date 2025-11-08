@@ -13,7 +13,9 @@ env:
   # Use ghcr.io for GitHub Container Registry, docker.io for Docker Hub if empty
   REGISTRY: ghcr.io
   # github.repository always resolves to <owner>/<repo>
-  IMAGE_NAME: ${{ github.repository }}
+  # Push images under a named package 'workload' (matches existing manual pushes)
+  # Resulting image: ${{ env.REGISTRY }}/${{ github.repository }}/workload
+  IMAGE_NAME: ${{ github.repository }}/workload
 
 jobs:
   build:
