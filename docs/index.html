@@ -32,9 +32,14 @@
     </section>
 
     <section class="hero">
-      <div class="screenshot">
-        <img src="screenshot.png" alt="deepSight dashboard showing uptime, requests, and system metrics" loading="lazy">
-      </div>
+      <figure class="screenshot">
+        <picture>
+          <!-- Responsive sources: replace with smaller files if you add them later -->
+          <source media="(max-width:600px)" srcset="screenshot.png" sizes="(max-width:600px) 100vw">
+          <img src="screenshot.png" alt="deepSight dashboard showing uptime, requests, and system metrics" loading="lazy" width="1200" height="800">
+        </picture>
+        <figcaption class="screenshot-cta">Try it locally — <a href="/">Run the demo</a></figcaption>
+      </figure>
       <p class="caption">Elegant, focused, and container-ready runtime insights</p>
     </section>
 

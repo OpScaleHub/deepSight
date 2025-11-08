@@ -7,8 +7,10 @@ header h1{margin:0;font-size:2.5rem;background:linear-gradient(135deg,var(--acce
 .badges{display:flex;gap:8px;justify-content:center}
 .badges img{height:20px}
 .hero{margin:0 -28px 28px;text-align:center}
-.screenshot{margin:0 auto;max-width:980px;padding:0 28px}
-.screenshot img{width:100%;height:auto;border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,0.3)}
+.screenshot{position:relative;margin:0 auto;max-width:980px;padding:0 28px}
+.screenshot img{width:100%;height:auto;border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,0.3);display:block}
+.screenshot-cta{position:absolute;left:28px;bottom:20px;background:linear-gradient(90deg, rgba(11,18,32,0.72), rgba(11,18,32,0.5));padding:8px 12px;border-radius:10px;color:var(--text);font-size:0.95rem;display:inline-flex;gap:10px;align-items:center;backdrop-filter:blur(4px)}
+.screenshot-cta a{background:var(--accent);color:white;padding:6px 10px;border-radius:8px;text-decoration:none;font-weight:600}
 .caption{color:var(--muted);text-align:center;margin:12px 0 0}
 .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);padding:18px;border-radius:10px;margin-bottom:14px}
 .card.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
@@ -16,6 +18,13 @@ header h1{margin:0;font-size:2.5rem;background:linear-gradient(135deg,var(--acce
 .cmd{background:#07111a;padding:10px;border-radius:6px;color:#cfe6ff;overflow:auto}
 footer{color:var(--muted);margin-top:12px}
 @media(max-width:720px){.card.two{grid-template-columns:1fr}}
+.screenshot-cta{right:28px}
+@media(max-width:720px){
+	body{padding:16px}
+	.wrap{padding:0 8px}
+	.screenshot{padding:0 12px}
+	.screenshot-cta{left:12px;right:12px;bottom:12px;font-size:0.85rem;padding:6px}
+}
 .features{list-style:none;padding:0;margin:12px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
 .features li{background:rgba(255,255,255,0.02);padding:12px;border-radius:8px;display:flex;align-items:center;gap:8px}
 .features li::before{content:"";display:inline-block;width:6px;height:6px;background:var(--accent);border-radius:50%}
