@@ -89,6 +89,9 @@ jobs:
     needs: determine_version
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    env:
+      # binary/artifact base name — required to avoid filenames that start with a dash
+      GO_APP_NAME: deepsight
     strategy:
       fail-fast: false
       matrix:
@@ -141,7 +144,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: ${{ env.ARTIFACT_PATH }}
+          # upload the generated archive (tar.gz or zip). Use a glob to match either.
+          path: ${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.*
           retention-days: 1
 
   create_release:
