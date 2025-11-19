@@ -1,55 +1,46 @@
-name: Docker
+name: Docker & Release
 
 on:
-  schedule:
-    - cron: '16 6 * * *'
   push:
     branches: [ "main" ]
-    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "main" ]
+  schedule:
+    - cron: '16 6 * * *'
 
 env:
-  # Use ghcr.io for GitHub Container Registry, docker.io for Docker Hub if empty
   REGISTRY: ghcr.io
-  # github.repository always resolves to <owner>/<repo>
-  # Push images under a named package 'workload' (matches existing manual pushes)
-  # Resulting image: ${{ env.REGISTRY }}/${{ github.repository }}/workload
-  # Push images under a named package 'workload' (matches existing manual pushes)
-  # Resulting image: ${{ env.REGISTRY }}/${{ github.repository }}/workload
   IMAGE_NAME: ${{ github.repository }}/workload
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   id-token: write
 
 jobs:
-  build:
-
+  build-and-release:
     runs-on: ubuntu-latest
-
-    # Use the built-in GITHUB_TOKEN (no PAT required). If GITHUB_TOKEN still can't write
-    # packages, check repository/org Actions settings (see next steps below).
     env: {}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # Optional: Install cosign for image signing (except on PRs)
-      - name: Install cosign
-        if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@v3.5.0
         with:
-          cosign-release: 'v2.2.4'
+          fetch-depth: 0
+
+      # Determine next semantic version using Versify (calculates new_version and should_bump)
+      - name: Determine next version (versify)
+        id: versify
+        uses: OpScaleHub/versify@main
+        with:
+          prefix: 'v'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Set up Docker Buildx for multiplatform builds and better caching
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Authenticate to GitHub Container Registry using GITHUB_TOKEN (except on PRs)
-      - name: Log in to GitHub Container Registry
+      # Authenticate to registry (skip on PRs)
+      - name: Log in to registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
@@ -64,14 +55,15 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      # Build and push Docker image with Buildx (skip push on PRs)
+      # Build and push Docker image, include the versify-calculated tag when a bump occurred
       - name: Build and push Docker image
         id: build-and-push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          # include metadata tags (e.g. latest, sha) and the version tag if present
+          tags: ${{ steps.versify.outputs.should_bump == 'true' && format('{0}\n{1}', steps.meta.outputs.tags, format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, steps.versify.outputs.new_version)) || steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -79,7 +71,25 @@ jobs:
       # Optionally sign the resulting Docker image digest (except on PRs)
       - name: Sign the published Docker image
         if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3.5.0
+        with:
+          cosign-release: 'v2.2.4'
+      - name: Cosign sign (if bumped)
+        if: github.event_name != 'pull_request' && steps.versify.outputs.should_bump == 'true'
         env:
-          TAGS: ${{ steps.meta.outputs.tags }}
+          TAGS: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.versify.outputs.new_version }}
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
+
+      # Create a GitHub Release when versify signals a bump (only on main branch pushes)
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.versify.outputs.should_bump == 'true'
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ steps.versify.outputs.new_version }}
+          release_name: ${{ steps.versify.outputs.new_version }}
+          draft: false
+          prerelease: false
+          body: |
+            Automated release created by Versify.
+            Version: ${{ steps.versify.outputs.new_version }}
