@@ -1,4 +1,4 @@
-name: Docker & Release
+name: Create Release
 
 on:
   push:
@@ -14,35 +14,29 @@ permissions:
   packages: write
   id-token: write
 
+
 jobs:
-  build-and-release:
+  release:
     runs-on: ubuntu-latest
-    env: {}
     steps:
-      - name: Checkout repository
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Download prebuilt Versify binary and determine next semantic version
-      - name: Download Versify binary
-        id: download_versify
-        run: |
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-          ARCH=$(uname -m)
-          if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi
-          URL="https://github.com/OpScaleHub/versify/releases/latest/download/versify-${OS}-${ARCH}"
-          echo "Downloading versify from: $URL"
-          curl -sSL "$URL" -o versify
-          chmod +x versify
-
-      - name: Get next version (versify)
+      - name: Get Next Version
         id: get_version
-        run: |
-          set -e
-          VERSION=$(./versify --prefix 'v' || true)
-          echo "new_version=$VERSION" >> $GITHUB_OUTPUT
-          if [ -z "$VERSION" ]; then echo "should_bump=false" >> $GITHUB_OUTPUT; else echo "should_bump=true" >> $GITHUB_OUTPUT; fi
+        uses: OpScaleHub/versify@v1
+
+      - name: Create Git Tag and GitHub Release
+        if: steps.get_version.outputs.should_bump == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.new_version }}
+          name: Release ${{ steps.get_version.outputs.new_version }}
+          body: "See CHANGELOG for details."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Set up Docker Buildx for multiplatform builds and better caching
       - name: Set up Docker Buildx
