@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -19,9 +20,21 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"embed"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var tmpl = template.Must(template.ParseFiles("templates/index.html"))
+//go:embed templates/* static/*
+var embeddedFiles embed.FS
+
+var tmpl *template.Template
+
+func init() {
+	tmpl = template.Must(template.New("index.html").ParseFS(embeddedFiles, "templates/index.html"))
+}
 
 // Server holds runtime state and simple in-memory metrics
 type Server struct {
@@ -58,7 +71,61 @@ func (s *Server) recordRequest() {
 	s.mu.Lock()
 	s.buckets[s.idx]++
 	s.mu.Unlock()
+	// Prometheus counter
+	promRequests.Inc()
 }
+
+// whoamiHandler returns machine-friendly request info similar to traefik/whoami
+func (s *Server) whoamiHandler(w http.ResponseWriter, r *http.Request) {
+	s.recordRequest()
+	hostname, _ := os.Hostname()
+
+	clientIP := func(r *http.Request) string {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			return strings.TrimSpace(parts[0])
+		}
+		if xr := r.Header.Get("X-Real-IP"); xr != "" {
+			return xr
+		}
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			return r.RemoteAddr
+		}
+		return host
+	}(r)
+
+	// include a small set of headers for machine consumption
+	hdrs := map[string][]string{}
+	for k, v := range r.Header {
+		hdrs[k] = v
+	}
+
+	out := map[string]interface{}{
+		"hostname":  hostname,
+		"client_ip": clientIP,
+		"method":    r.Method,
+		"path":      r.URL.Path,
+		"headers":   hdrs,
+	}
+	if v := os.Getenv("VERSION"); v != "" {
+		out["version"] = v
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// Prometheus metrics (basic)
+var (
+	promRequests = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "requests_total",
+		Help: "Total number of HTTP requests",
+	})
+	promLastReqMs = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "last_request_ms",
+		Help: "Last request duration in milliseconds",
+	})
+)
 
 func (s *Server) requestsPerMinute() uint64 {
 	s.mu.Lock()
@@ -242,6 +309,146 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "goroutines %d\n", runtime.NumGoroutine())
 }
 
+// sseHandler streams periodic server-side events (SSE) with light-weight runtime info
+func (s *Server) sseHandler(w http.ResponseWriter, r *http.Request) {
+	s.recordRequest()
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	ctx := r.Context()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+
+			s.mu.Lock()
+			buckets := make([]uint64, len(s.buckets))
+			copy(buckets, s.buckets[:])
+			idx := s.idx
+			s.mu.Unlock()
+
+			// reorder buckets to chronological order (oldest..newest)
+			n := len(buckets)
+			counts := make([]uint64, n)
+			for i := 0; i < n; i++ {
+				counts[i] = buckets[(idx+1+i)%n]
+			}
+
+			// compute heights (same logic as dashboard) from ordered counts
+			heights := make([]int, n)
+			max := uint64(1)
+			for _, v := range counts {
+				if v > max {
+					max = v
+				}
+			}
+			scale := 1.0
+			if max > 0 {
+				scale = 120.0 / float64(max)
+			}
+			for i, v := range counts {
+				h := int(float64(v) * scale)
+				if h < 2 {
+					h = 2
+				}
+				heights[i] = h
+			}
+
+			// capture client info for this SSE connection (helpful when behind proxies)
+			clientIP := func(r *http.Request) string {
+				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+					parts := strings.Split(xff, ",")
+					return strings.TrimSpace(parts[0])
+				}
+				if xr := r.Header.Get("X-Real-IP"); xr != "" {
+					return xr
+				}
+				host, _, err := net.SplitHostPort(r.RemoteAddr)
+				if err != nil {
+					return r.RemoteAddr
+				}
+				return host
+			}(r)
+
+			// small set of headers to expose
+			hdrs := map[string]string{}
+			allowed := []string{"Host", "User-Agent", "Accept", "Accept-Language", "Referer", "X-Forwarded-For", "X-Real-IP"}
+			for _, k := range allowed {
+				if v := r.Header.Get(k); v != "" {
+					hdrs[k] = v
+				}
+			}
+
+			payload := map[string]interface{}{
+				"requests_total":   atomic.LoadUint64(&s.reqTotal),
+				"requests_per_min": s.requestsPerMinute(),
+				"heights":          heights,
+				"counts":           counts,
+				"mem_alloc_mb":     float64(m.Alloc) / 1024.0 / 1024.0,
+				"goroutines":       runtime.NumGoroutine(),
+				"uptime":           time.Since(s.startTime).Truncate(time.Second).String(),
+				"client_ip":        clientIP,
+				"client_headers":   hdrs,
+				"client_method":    r.Method,
+				"client_path":      r.URL.Path,
+				"client_ua":        r.UserAgent(),
+			}
+			b, _ := json.Marshal(payload)
+			fmt.Fprintf(w, "data: %s\n\n", b)
+			flusher.Flush()
+		}
+	}
+}
+
+// response writer wrapper to capture status
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// implement http.Flusher so middleware preserves streaming ability
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// loggingMiddleware logs requests and records last request duration
+func loggingMiddleware(next http.Handler, s *Server) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rec, r)
+		dur := time.Since(start)
+		ms := int64(dur / time.Millisecond)
+		atomic.StoreInt64(&s.lastReqMs, ms)
+		promLastReqMs.Set(float64(ms))
+		// simple access log
+		client := r.RemoteAddr
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			client = strings.Split(xff, ",")[0]
+		}
+		log.Printf("%s %s %s %d %dms", client, r.Method, r.URL.Path, rec.status, ms)
+	})
+}
+
 func main() {
 	// If built with modules that disable symbol table info, enable it for stack traces.
 	_ = debug.SetGCPercent(100)
@@ -254,14 +461,19 @@ func main() {
 	}
 
 	srv := NewServer()
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", srv.dashboardHandler)
 	mux.HandleFunc("/health", srv.healthHandler)
-	mux.HandleFunc("/metrics", srv.metricsHandler)
+	// Prometheus handler mounted at /metrics (standard)
+	mux.Handle("/metrics", promhttp.Handler())
+	// keep the original simple plain-text endpoint for debugging at /metrics-plain
+	mux.HandleFunc("/metrics-plain", srv.metricsHandler)
+	// SSE stream for live updates used by the dashboard
+	mux.HandleFunc("/events", srv.sseHandler)
 	mux.HandleFunc("/ready", srv.readyHandler)
 	mux.HandleFunc("/toggle-ready", srv.toggleReadyHandler)
 	mux.HandleFunc("/version", srv.versionHandler)
+	mux.HandleFunc("/whoami", srv.whoamiHandler)
 
 	// pprof endpoints (useful for debugging)
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
@@ -270,13 +482,39 @@ func main() {
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
-	// serve static assets
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	// serve static assets from embedded filesystem (use subdir)
+	var staticFS http.FileSystem
+	if sub, err := fs.Sub(embeddedFiles, "static"); err == nil {
+		staticFS = http.FS(sub)
+	} else {
+		// fallback to root FS (should not normally happen)
+		staticFS = http.FS(embeddedFiles)
+	}
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(staticFS)))
+
+	// register Prometheus metrics (some depend on srv, do after it's created)
+	prometheus.MustRegister(promRequests)
+	prometheus.MustRegister(promLastReqMs)
+	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "uptime_seconds",
+		Help: "Server uptime in seconds",
+	}, func() float64 { return time.Since(srv.startTime).Seconds() }))
+	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "requests_per_min",
+		Help: "Requests received in the last 60 seconds",
+	}, func() float64 { return float64(srv.requestsPerMinute()) }))
+	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "goroutines",
+		Help: "Number of goroutines",
+	}, func() float64 { return float64(runtime.NumGoroutine()) }))
 
 	addr := fmt.Sprintf(":%d", port)
+	// wrap with logging/timing middleware
+	handler := loggingMiddleware(mux, srv)
+
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	// graceful shutdown

@@ -17,17 +17,10 @@ ENV GOOS=linux
 RUN go build -ldflags="-s -w" -o main .
 
 # Create a lightweight image for running
-FROM alpine:latest
+FROM scratch
 
-WORKDIR /root/
-
-# Install certificates (if your app makes outbound TLS calls)
-RUN apk add --no-cache ca-certificates
-
-# Copy the app binary and static assets from the builder stage.
-COPY --from=builder /app/main .
-COPY --from=builder /app/templates ./templates
-COPY --from=builder /app/static ./static
+# Copy the statically-linked binary from the builder stage.
+COPY --from=builder /app/main /main
 
 # Expose port
 EXPOSE 8080
@@ -41,4 +34,4 @@ LABEL org.opencontainers.image.source="https://github.com/OpScaleHub/deepSight"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # Run the Go binary
-CMD ["./main"]
+ENTRYPOINT ["/main"]
