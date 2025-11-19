@@ -68,6 +68,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
+      - name: Compute lowercase repository name
+        id: repo_lc
+        run: |
+          # GITHUB_REPOSITORY is of the form owner/repo — lowercase it for container tags
+          REPO_LC=$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          echo "repo_lc=$REPO_LC" >> $GITHUB_OUTPUT
+
+      - name: Show image tags
+        run: |
+          echo "Resolved image tags:"
+          echo "  ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:latest"
+          echo "  ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:${{ needs.determine_version.outputs.new_version }}"
+
       - name: Build and push Docker image
         id: build_image
         uses: docker/build-push-action@v5
@@ -77,8 +90,8 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/${{ toLower(github.repository) }}:latest
-            ghcr.io/${{ toLower(github.repository) }}:${{ needs.determine_version.outputs.new_version }}
+            ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:latest
+            ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:${{ needs.determine_version.outputs.new_version }}
 
       - name: Show image digest
         run: |
