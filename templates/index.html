@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -7,9 +8,14 @@
   <link rel="stylesheet" href="/static/style.css">
   <style>
     /* small in-template fallback styles */
-    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#0f1724; color:#e6eef8; }
+    body {
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: #0f1724;
+      color: #e6eef8;
+    }
   </style>
 </head>
+
 <body>
   <div class="container">
     <header>
@@ -20,47 +26,49 @@
     <section class="grid">
       <div class="card">
         <h3>Uptime</h3>
-        <div class="big">{{ .Uptime }}</div>
-        <div class="muted">Started: {{ .StartTime }}</div>
+        <div id="uptime" class="big">{{ .Uptime }}</div>
+        <div id="startTime" class="muted">Started: {{ .StartTime }}</div>
       </div>
 
       <div class="card">
         <h3>Requests</h3>
-        <div class="big">{{ .RequestsTotal }}</div>
-        <div class="muted">Last 60s: {{ .RequestsPerMin }}</div>
+        <div id="requestsTotal" class="big">{{ .RequestsTotal }}</div>
+        <div id="requestsPerMin" class="muted">Last 60s: {{ .RequestsPerMin }}</div>
       </div>
 
       <div class="card">
         <h3>Host</h3>
-        <div class="muted">{{ .Hostname }}</div>
-        <div class="muted">Go: {{ .GoVersion }} • Goroutines: {{ .NumGoroutine }}</div>
+        <div id="hostname" class="muted">{{ .Hostname }}</div>
+        <div class="muted">Go: <span id="goversion">{{ .GoVersion }}</span> • Goroutines: <span id="goroutines">{{
+            .NumGoroutine }}</span></div>
       </div>
 
       <div class="card">
         <h3>Memory</h3>
-        <div class="big">{{ printf "%.2f" .MemAllocMB }} MiB</div>
+        <div id="memAlloc" class="big">{{ printf "%.2f" .MemAllocMB }} MiB</div>
       </div>
     </section>
 
     <section class="chart card">
       <h3>Requests (last 60s)</h3>
-      <div class="sparkline">
+      <div id="sparkline" class="sparkline">
         {{ range .BarHeights }}
-          <div class="bar" data-h="{{ . }}" title="{{ . }}"></div>
+        <div class="bar" data-h="{{ . }}" title="{{ . }}"></div>
         {{ end }}
       </div>
     </section>
 
     <section class="card client">
       <h3>Client</h3>
-      <div class="muted small">{{ .ClientIP }} • <strong>{{ .ClientMethod }}</strong> {{ .ClientPath }}</div>
-      <div class="muted small">UA: {{ .ClientUA }}</div>
+      <div id="clientInfo" class="muted small">{{ .ClientIP }} • <strong>{{ .ClientMethod }}</strong> {{ .ClientPath }}
+      </div>
+      <div id="clientUA" class="muted small">UA: {{ .ClientUA }}</div>
 
       <details class="muted headers" style="margin-top:8px">
         <summary class="muted">Show headers</summary>
-        <ul>
+        <ul id="clientHeadersList">
           {{ range $k, $v := .ClientHeaders }}
-            <li><strong>{{ $k }}:</strong> {{ $v }}</li>
+          <li><strong>{{ $k }}:</strong> {{ $v }}</li>
           {{ end }}
         </ul>
       </details>
@@ -69,75 +77,509 @@
     <footer class="muted">/health • /metrics • container-ready for k8s</footer>
   </div>
 
-  <section class="container interactive" style="max-width:900px;margin:20px auto;">
+  <section class="container interactive" style="max-width:1100px;margin:20px auto;padding:6px">
     <div class="card">
       <h3>Interactive tools</h3>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <button id="btn-metrics">Refresh /metrics</button>
-        <button id="btn-version">Get /version</button>
-  <!-- /env removed -->
-        <button id="btn-ready">Check /ready</button>
-        <button id="btn-toggle-ready">Toggle readiness</button>
-        <a class="muted" href="/debug/pprof/" target="_blank">pprof</a>
+      <!-- layout row: left controls, middle outputs, right load tester -->
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div style="flex:0 0 auto;display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button id="btn-version">Get /version</button>
+            <button id="btn-ready">Check /ready</button>
+            <button id="btn-toggle-ready">Toggle readiness</button>
+            <a class="muted" href="/debug/pprof/" target="_blank">pprof</a>
+          </div>
+        </div>
+
+        <div style="flex:1 1 420px;min-width:300px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <pre id="out-version"
+            style="white-space:pre-wrap;word-break:break-word;background:#071025;padding:8px;border-radius:6px;min-height:60px">/version output</pre>
+          <pre id="out-ready"
+            style="white-space:pre-wrap;word-break:break-word;background:#071025;padding:8px;border-radius:6px;min-height:60px">/ready output</pre>
+        </div>
+
+        <div style="flex:0 0 420px;min-width:320px">
+          <h4 style="margin:6px 0">Client-side load tester</h4>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap">
+            <label class="muted">RPS:</label>
+            <input id="load-rps" type="number" value="10" min="1"
+              style="width:80px;padding:6px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+            <label class="muted">Duration (s):</label>
+            <input id="load-dur" type="number" value="10" min="1"
+              style="width:80px;padding:6px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+            <label class="muted">Mode:</label>
+            <select id="load-mode"
+              style="padding:6px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+              <option value="fixed">fixed</option>
+              <option value="ramp" selected>ramp</option>
+            </select>
+            <label class="muted">Curve:</label>
+            <select id="curve-type"
+              style="padding:6px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+              <option value="linear">linear</option>
+              <option value="sigmoid" selected>sigmoid</option>
+              <option value="expo">exponential</option>
+            </select>
+            <div style="display:flex;flex-direction:column;margin-left:8px;gap:6px;min-width:260px">
+              <div style="font-size:12px;color:var(--muted)">Phases (%)</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div style="display:flex;flex-direction:column;align-items:center;width:84px">
+                  <label class="muted" style="font-size:12px">Up</label>
+                  <input id="phase-up-range" type="range" min="0" max="100" value="70" style="width:80px">
+                  <input id="phase-up" type="number" value="70" min="0" max="100"
+                    style="width:56px;padding:4px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;width:84px">
+                  <label class="muted" style="font-size:12px">Hold</label>
+                  <input id="phase-hold-range" type="range" min="0" max="100" value="20" style="width:80px">
+                  <input id="phase-hold" type="number" value="20" min="0" max="100"
+                    style="width:56px;padding:4px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;width:84px">
+                  <label class="muted" style="font-size:12px">Down</label>
+                  <input id="phase-down-range" type="range" min="0" max="100" value="10" style="width:80px">
+                  <input id="phase-down" type="number" value="10" min="0" max="100"
+                    style="width:56px;padding:4px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+                </div>
+              </div>
+              <div id="phase-summary" style="font-size:12px;color:var(--muted)">Normalized: Up 0.70 • Hold 0.20 • Down
+                0.10</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <svg id="load-curve" width="240" height="60" style="background:#071025;border-radius:6px"></svg>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button id="btn-start-load">Start load</button>
+              <button id="btn-stop-load" disabled>Stop load</button>
+              <div id="load-status" class="muted" style="margin-left:6px">idle</div>
+            </div>
+          </div>
+        </div>
       </div>
-
-      <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <pre id="out-metrics" style="white-space:pre-wrap;word-break:break-word;background:#071025;padding:8px;border-radius:6px;min-height:60px">/metrics output</pre>
-        <pre id="out-version" style="white-space:pre-wrap;word-break:break-word;background:#071025;padding:8px;border-radius:6px;min-height:60px">/version output</pre>
-  <!-- /env output omitted -->
-        <pre id="out-ready" style="white-space:pre-wrap;word-break:break-word;background:#071025;padding:8px;border-radius:6px;min-height:60px">/ready output</pre>
-      </div>
-
-      <hr style="border-color:#16324a;margin:12px 0">
-
-      <!-- Echo UI removed (endpoint disabled) -->
     </div>
   </section>
+  </section>
+
+  <div id="overlay-tooltip" class="tooltip" aria-hidden="true"></div>
 
   <script>
     // set bar heights client-side to avoid template braces inside inline CSS
-    (function(){
-      try{
-        document.querySelectorAll('.bar').forEach(function(el){
+    (function () {
+      try {
+        document.querySelectorAll('.bar').forEach(function (el) {
           var h = el.getAttribute('data-h');
-          if(!h) return;
+          if (!h) return;
           el.style.height = h + 'px';
         });
-      }catch(e){
+      } catch (e) {
         // noop
       }
     })();
 
     // small helper to fetch and show JSON/text
-    async function fetchText(path, targetEl){
-      try{
+    async function fetchText(path, targetEl) {
+      try {
         const res = await fetch(path);
         const txt = await res.text();
         document.getElementById(targetEl).textContent = txt;
-      }catch(e){
+      } catch (e) {
         document.getElementById(targetEl).textContent = String(e);
       }
     }
 
-    document.getElementById('btn-metrics').addEventListener('click', function(){ fetchText('/metrics','out-metrics'); });
-    document.getElementById('btn-version').addEventListener('click', function(){ fetchText('/version','out-version'); });
-  // /env button removed — not available for security
-    document.getElementById('btn-ready').addEventListener('click', function(){ fetchText('/ready','out-ready'); });
-    document.getElementById('btn-toggle-ready').addEventListener('click', async function(){
-      try{
+    document.getElementById('btn-version').addEventListener('click', function () { fetchText('/version', 'out-version'); });
+    document.getElementById('btn-ready').addEventListener('click', function () { fetchText('/ready', 'out-ready'); });
+    document.getElementById('btn-toggle-ready').addEventListener('click', async function () {
+      try {
         // flip readiness
         const res = await fetch('/toggle-ready');
         const j = await res.json();
         document.getElementById('out-ready').textContent = JSON.stringify(j, null, 2);
-      }catch(e){ document.getElementById('out-ready').textContent = String(e); }
+      } catch (e) { document.getElementById('out-ready').textContent = String(e); }
     });
 
-    // Echo UI removed; no client-side echo handler
+    // connect to SSE for live updates with reconnect
+    (function () {
+      var es = null;
+      var retries = 0;
+      function connect() {
+        if (es) try { es.close(); } catch (e) { }
+        es = new EventSource('/events');
+        es.onmessage = function (ev) {
+          retries = 0;
+          try {
+            const d = JSON.parse(ev.data);
+            // numeric updates
+            var elReqTotal = document.getElementById('requestsTotal'); if (elReqTotal) elReqTotal.textContent = d.requests_total;
+            var elReqPerMin = document.getElementById('requestsPerMin'); if (elReqPerMin) elReqPerMin.textContent = 'Last 60s: ' + d.requests_per_min;
+            var elMem = document.getElementById('memAlloc'); if (elMem) elMem.textContent = d.mem_alloc_mb.toFixed(2) + ' MiB';
+            var elGr = document.getElementById('goroutines'); if (elGr) elGr.textContent = d.goroutines;
+            var elUp = document.getElementById('uptime'); if (elUp) elUp.textContent = d.uptime;
+            // update sparkline bars smoothly using raw counts (FIFO ordered)
+            var counts = d.counts || [];
+            // keep last counts available for tooltip comparisons
+            try { window.__lastCounts = counts.slice(); } catch (e) { window.__lastCounts = counts; }
+            var sp = document.getElementById('sparkline');
+            var bars = document.querySelectorAll('#sparkline .bar');
+            // compute scale using max of counts and 1
+            var max = 1;
+            for (var i = 0; i < counts.length; i++) if (counts[i] > max) max = counts[i];
+            // if there's an active planned schedule, include its peak so overlay is visible
+            if (window.__plannedSchedule && window.__plannedSchedule.length) {
+              var peak = Math.max.apply(null, window.__plannedSchedule.concat([0]));
+              if (peak > max) max = peak;
+            }
+            var chartH = 120;
+            if (counts.length && bars.length === counts.length) {
+              for (var i = 0; i < bars.length; i++) {
+                var h = Math.max(2, Math.round((counts[i] / max) * chartH));
+                bars[i].setAttribute('data-h', h);
+                bars[i].style.height = h + 'px';
+                bars[i].setAttribute('title', counts[i]);
+              }
+            } else if (counts.length) {
+              // rebuild bars from counts
+              sp.innerHTML = '';
+              counts.forEach(function (c) {
+                var h = Math.max(2, Math.round((c / max) * chartH));
+                var b = document.createElement('div');
+                b.className = 'bar';
+                b.style.height = h + 'px';
+                b.setAttribute('data-h', h);
+                b.setAttribute('title', c);
+                sp.appendChild(b);
+              });
+            }
+            // render overlay of planned schedule if present
+            if (window.__plannedSchedule && window.__plannedSchedule.length) {
+              // draw overlay heights onto small semi-transparent bars atop sparkline
+              var overlay = document.querySelectorAll('#sparkline .overlay');
+              if (overlay.length !== counts.length) {
+                // rebuild overlays
+                document.querySelectorAll('#sparkline .overlay').forEach(function (el) { el.remove(); });
+                // create overlay divs
+                counts.forEach(function () {
+                  var ov = document.createElement('div');
+                  ov.className = 'overlay';
+                  ov.style.bottom = '8px';
+                  ov.style.transition = 'height 300ms ease';
+                  ov.style.pointerEvents = 'auto';
+                  sp.appendChild(ov);
+                });
+                // ensure sparkline is positioned
+                sp.style.position = sp.style.position || 'relative';
+              }
+              // compute overlay mapping: align planned schedule to the right of counts
+              var ovEls = document.querySelectorAll('#sparkline .overlay');
+              var barsNow = document.querySelectorAll('#sparkline .bar');
+              var sched = window.__plannedSchedule;
+              var start = Math.max(0, counts.length - sched.length);
+              for (var i = 0; i < counts.length; i++) {
+                var val = 0;
+                var idx = i - start;
+                if (idx >= 0 && idx < sched.length) val = sched[idx];
+                var oh = Math.max(0, Math.round((val / max) * chartH));
+                if (ovEls[i]) {
+                  // align overlay horizontally with its corresponding bar if possible
+                  var left = 0, w = 8;
+                  if (barsNow[i]) {
+                    left = barsNow[i].offsetLeft + 'px';
+                    w = barsNow[i].offsetWidth + 'px';
+                  } else {
+                    // approximate based on index
+                    left = (i * 10) + 'px';
+                  }
+                  ovEls[i].style.left = left;
+                  ovEls[i].style.width = w;
+                  ovEls[i].style.height = oh + 'px';
+                  ovEls[i].setAttribute('data-planned', String(val));
+                  ovEls[i].setAttribute('data-index', String(i));
+                  ovEls[i].setAttribute('title', 'planned: ' + String(val));
+                }
+              }
+            }
+            // update client info if present in payload
+            if (d.client_ip) { var ci = document.getElementById('clientInfo'); if (ci) ci.textContent = d.client_ip + ' • ' + (d.client_method || '') + ' ' + (d.client_path || ''); }
+            if (d.client_ua) { var cua = document.getElementById('clientUA'); if (cua) cua.textContent = 'UA: ' + d.client_ua; }
+            if (d.client_headers) {
+              var ul = document.getElementById('clientHeadersList');
+              if (ul) { ul.innerHTML = ''; for (var k in d.client_headers) { var li = document.createElement('li'); li.innerHTML = '<strong>' + k + ':</strong> ' + d.client_headers[k]; ul.appendChild(li); } }
+            }
+          } catch (e) { /* noop */ }
+        };
+        es.onerror = function () {
+          // try to reconnect with exponential backoff
+          try { es.close(); } catch (e) { }
+          es = null;
+          retries++;
+          var backoff = Math.min(30, Math.pow(2, Math.min(retries, 6))); // seconds
+          setTimeout(connect, backoff * 1000);
+        };
+      }
+      // initial connect
+      connect();
+    })();
 
-    // initial warm fetches
-    fetchText('/metrics','out-metrics');
-    fetchText('/version','out-version');
+    // client-side load tester (supports fixed and ramp modes)
+    var loadInterval = null;
+    var loadRequests = 0;
+    document.getElementById('btn-start-load').addEventListener('click', function () {
+      var rps = parseInt(document.getElementById('load-rps').value || '10', 10);
+      var dur = parseInt(document.getElementById('load-dur').value || '10', 10);
+      var mode = document.getElementById('load-mode').value || 'fixed';
+      if (rps <= 0 || dur <= 0) return;
+      var btnStart = document.getElementById('btn-start-load');
+      document.getElementById('btn-start-load').disabled = true;
+      // show running state
+      try { btnStart.classList.add('btn-running'); btnStart.textContent = 'Running…'; } catch (e) { }
+      document.getElementById('btn-stop-load').disabled = false;
+      document.getElementById('load-status').textContent = 'running';
+      loadRequests = 0;
+      var elapsed = 0;
+      // compute per-second schedule depending on mode
+      var schedule = [];
+      if (mode === 'fixed') {
+        for (var t = 0; t < dur; t++) schedule.push(rps);
+      } else {
+        // ramp mode: use configurable phase percentages (up/hold/down)
+        var curve = document.getElementById('curve-type') ? document.getElementById('curve-type').value : 'sigmoid';
+        function applyCurve(f) {
+          if (curve === 'linear') return f;
+          if (curve === 'expo') return (Math.exp(f) - 1) / (Math.E - 1);
+          return f * f * (3 - 2 * f);
+        }
+        // read and normalize phase inputs
+        var up = parseFloat(document.getElementById('phase-up').value || '70');
+        var hold = parseFloat(document.getElementById('phase-hold').value || '20');
+        var down = parseFloat(document.getElementById('phase-down').value || '10');
+        var total = up + hold + down;
+        if (!isFinite(total) || total <= 0) { up = 70; hold = 20; down = 10; total = 100; }
+        var rampUpPct = up / total, holdPct = hold / total, rampDownPct = down / total;
+        var rampUpSec = Math.max(1, Math.floor(dur * rampUpPct));
+        var holdSec = Math.max(0, Math.floor(dur * holdPct));
+        var rampDownSec = Math.max(0, dur - rampUpSec - holdSec);
+        // ramp up
+        for (var i = 0; i < rampUpSec; i++) {
+          var frac = (rampUpSec === 1) ? 1 : (i + 1) / rampUpSec;
+          var adj = applyCurve(frac);
+          var v = Math.max(1, Math.round(1 + adj * (rps - 1)));
+          schedule.push(v);
+        }
+        // hold
+        for (var i = 0; i < holdSec; i++) schedule.push(rps);
+        // ramp down
+        for (var i = 0; i < rampDownSec; i++) {
+          var frac = (rampDownSec === 1) ? 1 : (i + 1) / rampDownSec;
+          var adj = applyCurve(1 - frac);
+          var v = Math.max(0, Math.round(rps * adj));
+          schedule.push(v);
+        }
+        // normalize schedule length
+        while (schedule.length < dur) schedule.push(0);
+        if (schedule.length > dur) schedule = schedule.slice(0, dur);
+      }
+
+      // expose planned schedule for overlay and draw preview
+      window.__plannedSchedule = schedule.slice();
+      drawCurve(window.__plannedSchedule);
+      // schedule per-second bursts based on schedule array
+      var idx = 0;
+      loadInterval = setInterval(function () {
+        var curRps = schedule[idx] || 0;
+        for (var i = 0; i < curRps; i++) {
+          fetch('/whoami').then(() => { loadRequests++; }).catch(() => { });
+        }
+        elapsed++;
+        idx++;
+        document.getElementById('load-status').textContent = 'sent: ' + loadRequests + ' elapsed: ' + elapsed + 's';
+        if (elapsed >= dur) {
+          clearInterval(loadInterval); loadInterval = null;
+          var btnStart = document.getElementById('btn-start-load');
+          document.getElementById('btn-start-load').disabled = false;
+          try { btnStart.classList.remove('btn-running'); btnStart.textContent = 'Start load'; } catch (e) { }
+          document.getElementById('btn-stop-load').disabled = true;
+          document.getElementById('load-status').textContent = 'done, sent: ' + loadRequests;
+        }
+      }, 1000);
+    });
+    document.getElementById('btn-stop-load').addEventListener('click', function () {
+      if (loadInterval) clearInterval(loadInterval);
+      loadInterval = null;
+      var btnStart = document.getElementById('btn-start-load');
+      document.getElementById('btn-start-load').disabled = false;
+      try { btnStart.classList.remove('btn-running'); btnStart.textContent = 'Start load'; } catch (e) { }
+      document.getElementById('btn-stop-load').disabled = true;
+      document.getElementById('load-status').textContent = 'stopped';
+      // clear planned curve
+      window.__plannedSchedule = [];
+      drawCurve([]);
+    });
+
+    // initial warm fetch for version and readiness
+    fetchText('/version', 'out-version');
+    fetchText('/ready', 'out-ready');
+
+    // overlay tooltip for planned schedule bars (delegated)
+    (function () {
+      var tip = document.getElementById('overlay-tooltip');
+      var sp = document.getElementById('sparkline');
+      if (!tip || !sp) return;
+      sp.addEventListener('mousemove', function (ev) {
+        try {
+          var target = ev.target;
+          var ov = (target && target.closest) ? target.closest('.overlay') : null;
+          if (!ov) { tip.classList.remove('visible'); tip.setAttribute('aria-hidden', 'true'); return; }
+          var planned = ov.getAttribute('data-planned') || '0';
+          var idx = ov.getAttribute('data-index') || '';
+          tip.innerHTML = '<strong>' + planned + ' rps</strong><br><span style="font-size:11px;color:var(--muted)">sec: ' + idx + '</span>';
+          tip.style.left = (ev.clientX) + 'px';
+          tip.style.top = (ev.clientY - 12) + 'px';
+          tip.classList.add('visible'); tip.setAttribute('aria-hidden', 'false');
+        } catch (e) { /* noop */ }
+      });
+      sp.addEventListener('mouseleave', function () { tip.classList.remove('visible'); tip.setAttribute('aria-hidden', 'true'); });
+    })();
+
+    // persist/load load-tester settings to localStorage
+    (function () {
+      var key = 'deepsight.loadertester.v1';
+      function save() {
+        try {
+          var payload = {
+            rps: document.getElementById('load-rps').value,
+            dur: document.getElementById('load-dur').value,
+            mode: document.getElementById('load-mode').value,
+            curve: document.getElementById('curve-type').value,
+            up: document.getElementById('phase-up').value,
+            hold: document.getElementById('phase-hold').value,
+            down: document.getElementById('phase-down').value
+          };
+          localStorage.setItem(key, JSON.stringify(payload));
+        } catch (e) { /* noop */ }
+      }
+      function load() {
+        try {
+          var raw = localStorage.getItem(key);
+          if (!raw) return;
+          var p = JSON.parse(raw);
+          if (!p) return;
+          if (p.rps) document.getElementById('load-rps').value = p.rps;
+          if (p.dur) document.getElementById('load-dur').value = p.dur;
+          if (p.mode) document.getElementById('load-mode').value = p.mode;
+          if (p.curve) document.getElementById('curve-type').value = p.curve;
+          if (p.up) { document.getElementById('phase-up').value = p.up; document.getElementById('phase-up-range').value = p.up; }
+          if (p.hold) { document.getElementById('phase-hold').value = p.hold; document.getElementById('phase-hold-range').value = p.hold; }
+          if (p.down) { document.getElementById('phase-down').value = p.down; document.getElementById('phase-down-range').value = p.down; }
+        } catch (e) { /* noop */ }
+      }
+      // sync sliders/inputs and summary
+      function updatePhaseSummary() {
+        var up = parseFloat(document.getElementById('phase-up').value || '70');
+        var hold = parseFloat(document.getElementById('phase-hold').value || '20');
+        var down = parseFloat(document.getElementById('phase-down').value || '10');
+        var total = up + hold + down; if (!isFinite(total) || total <= 0) total = 100;
+        var nu = (up / total) || 0; var nh = (hold / total) || 0; var nd = (down / total) || 0;
+        document.getElementById('phase-summary').textContent = 'Normalized: Up ' + nu.toFixed(2) + ' • Hold ' + nh.toFixed(2) + ' • Down ' + nd.toFixed(2);
+      }
+      // linked sliders: when one changes, adjust the other two proportionally to keep total ~= 100
+      function adjustLinked(changedNumId, newVal) {
+        var ids = ['phase-up', 'phase-hold', 'phase-down'];
+        // clamp
+        newVal = Math.max(0, Math.min(100, Number(newVal) || 0));
+        // read current values
+        var vals = {};
+        ids.forEach(function (id) { vals[id] = Number(document.getElementById(id).value) || 0; });
+        vals[changedNumId] = newVal;
+        var remaining = 100 - vals[changedNumId];
+        if (remaining <= 0) {
+          // set others to zero
+          ids.forEach(function (id) { if (id !== changedNumId) vals[id] = 0; });
+        } else {
+          var otherIds = ids.filter(function (id) { return id !== changedNumId; });
+          var sumOthers = otherIds.reduce(function (s, id) { return s + vals[id]; }, 0);
+          if (sumOthers <= 0) {
+            // split remaining equally
+            var each = Math.floor(remaining / otherIds.length);
+            otherIds.forEach(function (id) { vals[id] = each; });
+            // distribute remainder
+            var rem = remaining - each * otherIds.length;
+            for (var i = 0; i < rem; i++) vals[otherIds[i % otherIds.length]] += 1;
+          } else {
+            // scale others proportionally
+            otherIds.forEach(function (id) {
+              vals[id] = Math.round((vals[id] / sumOthers) * remaining);
+            });
+            // fix rounding to make total 100
+            var total = ids.reduce(function (s, id) { return s + vals[id]; }, 0);
+            var diff = 100 - total;
+            if (diff !== 0) {
+              // apply diff to the first other (or changed) to preserve sum
+              var target = otherIds[0] || changedNumId;
+              vals[target] = Math.max(0, vals[target] + diff);
+            }
+          }
+        }
+        // write back to DOM (both number and range inputs)
+        ids.forEach(function (id) {
+          var num = document.getElementById(id);
+          var range = document.getElementById(id + '-range');
+          if (num) num.value = vals[id];
+          if (range) range.value = vals[id];
+        });
+        updatePhaseSummary(); save();
+      }
+      function bindLinked(rangeId, numId) {
+        var r = document.getElementById(rangeId); var n = document.getElementById(numId);
+        if (!r || !n) return;
+        r.addEventListener('input', function () { adjustLinked(numId, Number(r.value)); });
+        n.addEventListener('change', function () { var v = Math.max(0, Math.min(100, Number(n.value) || 0)); adjustLinked(numId, v); });
+      }
+      bindLinked('phase-up-range', 'phase-up'); bindLinked('phase-hold-range', 'phase-hold'); bindLinked('phase-down-range', 'phase-down');
+      // save other controls on change
+      ['load-rps', 'load-dur', 'load-mode', 'curve-type'].forEach(function (id) { var el = document.getElementById(id); if (!el) return; el.addEventListener('change', save); });
+      // ensure summary updates
+      updatePhaseSummary(); load(); updatePhaseSummary();
+    })();
+
+    // draw planned RPS curve into the small SVG
+    function drawCurve(schedule) {
+      var svg = document.getElementById('load-curve');
+      if (!svg) return;
+      // clear
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      if (!schedule || schedule.length === 0) return;
+      var w = svg.getAttribute('width') * 1, h = svg.getAttribute('height') * 1;
+      var max = Math.max.apply(null, schedule.concat([1]));
+      var points = [];
+      for (var i = 0; i < schedule.length; i++) {
+        var x = (i / (schedule.length - 1)) * (w - 8) + 4;
+        var y = h - Math.round((schedule[i] / max) * (h - 8)) - 4;
+        points.push([x, y]);
+      }
+      // create path
+      var ns = 'http://www.w3.org/2000/svg';
+      var path = document.createElementNS(ns, 'path');
+      var d = '';
+      for (var i = 0; i < points.length; i++) {
+        var p = points[i];
+        if (i === 0) d += 'M ' + p[0] + ' ' + p[1]; else d += ' L ' + p[0] + ' ' + p[1];
+      }
+      path.setAttribute('d', d);
+      path.setAttribute('stroke', '#7c3aed');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke-width', '2');
+      path.setAttribute('stroke-opacity', '0.9');
+      svg.appendChild(path);
+      // fill under curve
+      var poly = document.createElementNS(ns, 'path');
+      var d2 = d + ' L ' + (points[points.length - 1][0]) + ' ' + (h - 2) + ' L ' + (points[0][0]) + ' ' + (h - 2) + ' Z';
+      poly.setAttribute('d', d2);
+      poly.setAttribute('fill', '#7c3aed');
+      poly.setAttribute('fill-opacity', '0.08');
+      svg.appendChild(poly);
+    }
   </script>
 
 </body>
+
 </html>

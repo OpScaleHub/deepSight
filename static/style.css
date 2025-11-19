@@ -1,24 +1,191 @@
-:root{
-  --bg:#0f1724; --card:#0b1220; --accent:#7c3aed; --muted:#9fb0c8; --text:#e6eef8;
+:root {
+  --bg: #0f1724;
+  --card: #0b1220;
+  --accent: #7c3aed;
+  --muted: #9fb0c8;
+  --text: #e6eef8;
 }
-body{margin:0;padding:24px;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Arial}
-.container{max-width:980px;margin:0 auto}
-header{display:flex;align-items:baseline;gap:16px}
-header h1{margin:0;font-size:1.6rem}
-.muted{color:var(--muted)}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px}
-.card{background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);padding:16px;border-radius:8px}
-.big{font-size:1.4rem;font-weight:700;margin-top:8px}
-.chart.card{margin-top:16px}
-.sparkline{display:flex;align-items:end;gap:3px;height:130px;padding:8px}
-.bar{width:6px;background:linear-gradient(180deg,var(--accent),#3b82f6);border-radius:3px}
-footer{margin-top:18px;color:var(--muted)}
 
-@media (max-width:720px){.grid{grid-template-columns:1fr}}
+body {
+  margin: 0;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, system-ui, Segoe UI, Roboto, Arial
+}
+
+.container {
+  max-width: 980px;
+  margin: 0 auto
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.6rem
+}
+
+.muted {
+  color: var(--muted)
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px
+}
+
+.card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+  padding: 16px;
+  border-radius: 8px
+}
+
+.big {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-top: 8px
+}
+
+.chart.card {
+  margin-top: 16px
+}
+
+.sparkline {
+  display: flex;
+  align-items: end;
+  gap: 3px;
+  height: 130px;
+  padding: 8px
+}
+
+.bar {
+  width: 6px;
+  background: linear-gradient(180deg, var(--accent), #3b82f6);
+  border-radius: 3px
+}
+
+/* make the sparkline container a positioned element so overlays can align */
+.sparkline {
+  position: relative;
+}
+
+/* overlay bars drawn atop the sparkline to preview planned load */
+.sparkline .overlay {
+  position: absolute;
+  bottom: 8px;
+  background: rgba(124, 58, 237, 0.18);
+  border-radius: 3px;
+  transition: height 300ms ease, background 120ms ease;
+  pointer-events: auto;
+}
+
+.sparkline .overlay:hover {
+  background: rgba(124, 58, 237, 0.28);
+}
+
+/* slightly wider bars for better visibility */
+.bar {
+  width: 8px;
+}
+
+/* animate bar height changes for live updates */
+.bar {
+  transition: height 300ms ease
+}
+
+footer {
+  margin-top: 18px;
+  color: var(--muted)
+}
+
+@media (max-width:720px) {
+  .grid {
+    grid-template-columns: 1fr
+  }
+}
 
 /* client card styling */
-.client summary { cursor: pointer; }
-.client .small { font-size:0.95rem }
-.client .headers ul{ list-style:none; padding-left:0; margin:8px 0 0 0 }
-.client .headers li{ padding:4px 0; border-bottom:1px dashed rgba(255,255,255,0.02)}
+.client summary {
+  cursor: pointer;
+}
 
+.client .small {
+  font-size: 0.95rem
+}
+
+.client .headers ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 8px 0 0 0
+}
+
+.client .headers li {
+  padding: 4px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.02)
+}
+
+/* tooltip for overlay bars */
+.tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: rgba(2, 6, 23, 0.95);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.6);
+  border: 1px solid rgba(124, 58, 237, 0.12);
+  transform: translate(-50%, -120%);
+  white-space: nowrap;
+  z-index: 9999;
+  transition: opacity 120ms ease, transform 120ms ease;
+  opacity: 0;
+}
+
+.tooltip.visible {
+  opacity: 1;
+}
+
+/* Start button running state */
+.btn-running {
+  position: relative;
+  color: #fff;
+  background: linear-gradient(90deg, #6d28d9, #4f46e5);
+  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.12);
+}
+
+.btn-running::after {
+  content: '';
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 rgba(255, 255, 255, 0.3);
+  background: #fff;
+  opacity: 0.9;
+  animation: pulse 1.2s infinite ease-out;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.6);
+  }
+
+  70% {
+    box-shadow: 0 0 0 10px rgba(124, 58, 237, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0);
+  }
+}
