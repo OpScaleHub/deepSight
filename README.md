@@ -43,3 +43,5 @@ kubectl port-forward svc/deepsight 8080:80
 Notes:
 - Update the image name in `k8s/deployment.yaml` to match your registry.
 - The app serves static files from `/static` and templates from `templates` at runtime — the Dockerfile copies the full repo before building.
+
+# adding CD
