@@ -27,13 +27,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Determine next semantic version using Versify (calculates new_version and should_bump)
-      - name: Determine next version (versify)
-        id: versify
-        uses: OpScaleHub/versify@main
-        with:
-          prefix: 'v'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # Download prebuilt Versify binary and determine next semantic version
+      - name: Download Versify binary
+        id: download_versify
+        run: |
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; elif [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi
+          URL="https://github.com/OpScaleHub/versify/releases/latest/download/versify-${OS}-${ARCH}"
+          echo "Downloading versify from: $URL"
+          curl -sSL "$URL" -o versify
+          chmod +x versify
+
+      - name: Get next version (versify)
+        id: get_version
+        run: |
+          set -e
+          VERSION=$(./versify --prefix 'v' || true)
+          echo "new_version=$VERSION" >> $GITHUB_OUTPUT
+          if [ -z "$VERSION" ]; then echo "should_bump=false" >> $GITHUB_OUTPUT; else echo "should_bump=true" >> $GITHUB_OUTPUT; fi
 
       # Set up Docker Buildx for multiplatform builds and better caching
       - name: Set up Docker Buildx
@@ -63,7 +75,7 @@ jobs:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
           # include metadata tags (e.g. latest, sha) and the version tag if present
-          tags: ${{ steps.versify.outputs.should_bump == 'true' && format('{0}\n{1}', steps.meta.outputs.tags, format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, steps.versify.outputs.new_version)) || steps.meta.outputs.tags }}
+          tags: ${{ steps.get_version.outputs.should_bump == 'true' && format('{0}\n{1}', steps.meta.outputs.tags, format('{0}/{1}:{2}', env.REGISTRY, env.IMAGE_NAME, steps.get_version.outputs.new_version)) || steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -75,21 +87,21 @@ jobs:
         with:
           cosign-release: 'v2.2.4'
       - name: Cosign sign (if bumped)
-        if: github.event_name != 'pull_request' && steps.versify.outputs.should_bump == 'true'
+        if: github.event_name != 'pull_request' && steps.get_version.outputs.should_bump == 'true'
         env:
-          TAGS: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.versify.outputs.new_version }}
+          TAGS: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_version.outputs.new_version }}
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
 
       # Create a GitHub Release when versify signals a bump (only on main branch pushes)
       - name: Create GitHub Release
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.versify.outputs.should_bump == 'true'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && steps.get_version.outputs.should_bump == 'true'
         uses: actions/create-release@v1
         with:
-          tag_name: ${{ steps.versify.outputs.new_version }}
-          release_name: ${{ steps.versify.outputs.new_version }}
+          tag_name: ${{ steps.get_version.outputs.new_version }}
+          release_name: ${{ steps.get_version.outputs.new_version }}
           draft: false
           prerelease: false
           body: |
             Automated release created by Versify.
-            Version: ${{ steps.versify.outputs.new_version }}
+            Version: ${{ steps.get_version.outputs.new_version }}
