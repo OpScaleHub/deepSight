@@ -2,11 +2,8 @@ name: Docker & Release
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  schedule:
-    - cron: '16 6 * * *'
+    branches:
+      - main
 
 env:
   REGISTRY: ghcr.io
