@@ -22,16 +22,22 @@ jobs:
           sudo mv versify-linux-amd64 /usr/local/bin/versify
           rm versify.tar.gz
 
-      - name: Get Next Version
-        id: get_version
+      - name: Run versify to determine next version
+        id: versify
         run: |
+          # Run versify to get the proposed version
           VERSION=$(versify)
-          if [[ -z "$VERSION" ]]; then
-            echo "No version change detected."
-            echo "version=" >> $GITHUB_OUTPUT
+          echo "Proposed version: $VERSION"
+
+          # Check if the tag already exists
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists. No new release needed."
+            # Use the new workflow output file instead of deprecated set-output
+            echo "should_release=false" >> $GITHUB_OUTPUT
           else
-            echo "New version found: $VERSION"
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "New version $VERSION will be released."
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "new_version=$VERSION" >> $GITHUB_OUTPUT
           fi
 
   build_and_test:
