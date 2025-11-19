@@ -26,7 +26,7 @@ jobs:
 
       - name: Get Next Version
         id: get_version
-        uses: OpScaleHub/versify@v1
+        uses: OpScaleHub/versify@v0.5.0
 
       - name: Create Git Tag and GitHub Release
         if: steps.get_version.outputs.should_bump == 'true'
