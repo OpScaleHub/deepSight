@@ -120,6 +120,31 @@
               <option value="sigmoid" selected>sigmoid</option>
               <option value="expo">exponential</option>
             </select>
+            <div style="display:flex;flex-direction:column;margin-left:8px;gap:6px;min-width:260px">
+              <div style="font-size:12px;color:var(--muted)">Phases (%)</div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div style="display:flex;flex-direction:column;align-items:center;width:84px">
+                  <label class="muted" style="font-size:12px">Up</label>
+                  <input id="phase-up-range" type="range" min="0" max="100" value="70" style="width:80px">
+                  <input id="phase-up" type="number" value="70" min="0" max="100"
+                    style="width:56px;padding:4px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;width:84px">
+                  <label class="muted" style="font-size:12px">Hold</label>
+                  <input id="phase-hold-range" type="range" min="0" max="100" value="20" style="width:80px">
+                  <input id="phase-hold" type="number" value="20" min="0" max="100"
+                    style="width:56px;padding:4px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:center;width:84px">
+                  <label class="muted" style="font-size:12px">Down</label>
+                  <input id="phase-down-range" type="range" min="0" max="100" value="10" style="width:80px">
+                  <input id="phase-down" type="number" value="10" min="0" max="100"
+                    style="width:56px;padding:4px;border-radius:4px;background:#071025;color:var(--text);border:1px solid rgba(255,255,255,0.03)">
+                </div>
+              </div>
+              <div id="phase-summary" style="font-size:12px;color:var(--muted)">Normalized: Up 0.70 • Hold 0.20 • Down
+                0.10</div>
+            </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
             <svg id="load-curve" width="240" height="60" style="background:#071025;border-radius:6px"></svg>
@@ -134,6 +159,8 @@
     </div>
   </section>
   </section>
+
+  <div id="overlay-tooltip" class="tooltip" aria-hidden="true"></div>
 
   <script>
     // set bar heights client-side to avoid template braces inside inline CSS
@@ -190,6 +217,8 @@
             var elUp = document.getElementById('uptime'); if (elUp) elUp.textContent = d.uptime;
             // update sparkline bars smoothly using raw counts (FIFO ordered)
             var counts = d.counts || [];
+            // keep last counts available for tooltip comparisons
+            try { window.__lastCounts = counts.slice(); } catch (e) { window.__lastCounts = counts; }
             var sp = document.getElementById('sparkline');
             var bars = document.querySelectorAll('#sparkline .bar');
             // compute scale using max of counts and 1
@@ -227,18 +256,22 @@
               var overlay = document.querySelectorAll('#sparkline .overlay');
               if (overlay.length !== counts.length) {
                 // rebuild overlays
-                // remove any existing overlay elems
                 document.querySelectorAll('#sparkline .overlay').forEach(function (el) { el.remove(); });
                 // create overlay divs
                 counts.forEach(function () {
-                  var ov = document.createElement('div'); ov.className = 'overlay'; ov.style.position = 'absolute'; ov.style.width = '6px'; ov.style.background = 'rgba(124,58,237,0.18)'; ov.style.borderRadius = '3px'; ov.style.bottom = '8px'; ov.style.transition = 'height 300ms ease'; sp.appendChild(ov);
+                  var ov = document.createElement('div');
+                  ov.className = 'overlay';
+                  ov.style.bottom = '8px';
+                  ov.style.transition = 'height 300ms ease';
+                  ov.style.pointerEvents = 'auto';
+                  sp.appendChild(ov);
                 });
-                // position sparkline relatively
-                sp.style.position = 'relative';
-                // set container child order: bars then overlays
+                // ensure sparkline is positioned
+                sp.style.position = sp.style.position || 'relative';
               }
               // compute overlay mapping: align planned schedule to the right of counts
               var ovEls = document.querySelectorAll('#sparkline .overlay');
+              var barsNow = document.querySelectorAll('#sparkline .bar');
               var sched = window.__plannedSchedule;
               var start = Math.max(0, counts.length - sched.length);
               for (var i = 0; i < counts.length; i++) {
@@ -246,7 +279,23 @@
                 var idx = i - start;
                 if (idx >= 0 && idx < sched.length) val = sched[idx];
                 var oh = Math.max(0, Math.round((val / max) * chartH));
-                if (ovEls[i]) ovEls[i].style.height = oh + 'px';
+                if (ovEls[i]) {
+                  // align overlay horizontally with its corresponding bar if possible
+                  var left = 0, w = 8;
+                  if (barsNow[i]) {
+                    left = barsNow[i].offsetLeft + 'px';
+                    w = barsNow[i].offsetWidth + 'px';
+                  } else {
+                    // approximate based on index
+                    left = (i * 10) + 'px';
+                  }
+                  ovEls[i].style.left = left;
+                  ovEls[i].style.width = w;
+                  ovEls[i].style.height = oh + 'px';
+                  ovEls[i].setAttribute('data-planned', String(val));
+                  ovEls[i].setAttribute('data-index', String(i));
+                  ovEls[i].setAttribute('title', 'planned: ' + String(val));
+                }
               }
             }
             // update client info if present in payload
@@ -279,7 +328,10 @@
       var dur = parseInt(document.getElementById('load-dur').value || '10', 10);
       var mode = document.getElementById('load-mode').value || 'fixed';
       if (rps <= 0 || dur <= 0) return;
+      var btnStart = document.getElementById('btn-start-load');
       document.getElementById('btn-start-load').disabled = true;
+      // show running state
+      try { btnStart.classList.add('btn-running'); btnStart.textContent = 'Running…'; } catch (e) { }
       document.getElementById('btn-stop-load').disabled = false;
       document.getElementById('load-status').textContent = 'running';
       loadRequests = 0;
@@ -289,35 +341,35 @@
       if (mode === 'fixed') {
         for (var t = 0; t < dur; t++) schedule.push(rps);
       } else {
-        // ramp mode: rampUp 70%, hold 20%, rampDown 10% (sums to 100%)
+        // ramp mode: use configurable phase percentages (up/hold/down)
         var curve = document.getElementById('curve-type') ? document.getElementById('curve-type').value : 'sigmoid';
         function applyCurve(f) {
-          // f is 0..1
           if (curve === 'linear') return f;
-          if (curve === 'expo') {
-            // ease-in-out exponential-ish
-            return (Math.exp(f) - 1) / (Math.E - 1);
-          }
-          // default sigmoid (smooth S) - normalized logistic-ish
-          // using smoothstep-like approximation
+          if (curve === 'expo') return (Math.exp(f) - 1) / (Math.E - 1);
           return f * f * (3 - 2 * f);
         }
-        var rampUpPct = 0.7, holdPct = 0.2, rampDownPct = 0.1;
+        // read and normalize phase inputs
+        var up = parseFloat(document.getElementById('phase-up').value || '70');
+        var hold = parseFloat(document.getElementById('phase-hold').value || '20');
+        var down = parseFloat(document.getElementById('phase-down').value || '10');
+        var total = up + hold + down;
+        if (!isFinite(total) || total <= 0) { up = 70; hold = 20; down = 10; total = 100; }
+        var rampUpPct = up / total, holdPct = hold / total, rampDownPct = down / total;
         var rampUpSec = Math.max(1, Math.floor(dur * rampUpPct));
         var holdSec = Math.max(0, Math.floor(dur * holdPct));
         var rampDownSec = Math.max(0, dur - rampUpSec - holdSec);
-        // linear ramp up from 1 to rps across rampUpSec
+        // ramp up
         for (var i = 0; i < rampUpSec; i++) {
-          var frac = (rampUpSec === 1) ? 1 : (i + 1) / rampUpSec; // 0..1
+          var frac = (rampUpSec === 1) ? 1 : (i + 1) / rampUpSec;
           var adj = applyCurve(frac);
           var v = Math.max(1, Math.round(1 + adj * (rps - 1)));
           schedule.push(v);
         }
-        // hold at near-peak for holdSec
+        // hold
         for (var i = 0; i < holdSec; i++) schedule.push(rps);
-        // ramp down to zero over rampDownSec
+        // ramp down
         for (var i = 0; i < rampDownSec; i++) {
-          var frac = (rampDownSec === 1) ? 1 : (i + 1) / rampDownSec; // 0..1
+          var frac = (rampDownSec === 1) ? 1 : (i + 1) / rampDownSec;
           var adj = applyCurve(1 - frac);
           var v = Math.max(0, Math.round(rps * adj));
           schedule.push(v);
@@ -342,7 +394,9 @@
         document.getElementById('load-status').textContent = 'sent: ' + loadRequests + ' elapsed: ' + elapsed + 's';
         if (elapsed >= dur) {
           clearInterval(loadInterval); loadInterval = null;
+          var btnStart = document.getElementById('btn-start-load');
           document.getElementById('btn-start-load').disabled = false;
+          try { btnStart.classList.remove('btn-running'); btnStart.textContent = 'Start load'; } catch (e) { }
           document.getElementById('btn-stop-load').disabled = true;
           document.getElementById('load-status').textContent = 'done, sent: ' + loadRequests;
         }
@@ -351,7 +405,9 @@
     document.getElementById('btn-stop-load').addEventListener('click', function () {
       if (loadInterval) clearInterval(loadInterval);
       loadInterval = null;
+      var btnStart = document.getElementById('btn-start-load');
       document.getElementById('btn-start-load').disabled = false;
+      try { btnStart.classList.remove('btn-running'); btnStart.textContent = 'Start load'; } catch (e) { }
       document.getElementById('btn-stop-load').disabled = true;
       document.getElementById('load-status').textContent = 'stopped';
       // clear planned curve
@@ -362,6 +418,128 @@
     // initial warm fetch for version and readiness
     fetchText('/version', 'out-version');
     fetchText('/ready', 'out-ready');
+
+    // overlay tooltip for planned schedule bars (delegated)
+    (function () {
+      var tip = document.getElementById('overlay-tooltip');
+      var sp = document.getElementById('sparkline');
+      if (!tip || !sp) return;
+      sp.addEventListener('mousemove', function (ev) {
+        try {
+          var target = ev.target;
+          var ov = (target && target.closest) ? target.closest('.overlay') : null;
+          if (!ov) { tip.classList.remove('visible'); tip.setAttribute('aria-hidden', 'true'); return; }
+          var planned = ov.getAttribute('data-planned') || '0';
+          var idx = ov.getAttribute('data-index') || '';
+          tip.innerHTML = '<strong>' + planned + ' rps</strong><br><span style="font-size:11px;color:var(--muted)">sec: ' + idx + '</span>';
+          tip.style.left = (ev.clientX) + 'px';
+          tip.style.top = (ev.clientY - 12) + 'px';
+          tip.classList.add('visible'); tip.setAttribute('aria-hidden', 'false');
+        } catch (e) { /* noop */ }
+      });
+      sp.addEventListener('mouseleave', function () { tip.classList.remove('visible'); tip.setAttribute('aria-hidden', 'true'); });
+    })();
+
+    // persist/load load-tester settings to localStorage
+    (function () {
+      var key = 'deepsight.loadertester.v1';
+      function save() {
+        try {
+          var payload = {
+            rps: document.getElementById('load-rps').value,
+            dur: document.getElementById('load-dur').value,
+            mode: document.getElementById('load-mode').value,
+            curve: document.getElementById('curve-type').value,
+            up: document.getElementById('phase-up').value,
+            hold: document.getElementById('phase-hold').value,
+            down: document.getElementById('phase-down').value
+          };
+          localStorage.setItem(key, JSON.stringify(payload));
+        } catch (e) { /* noop */ }
+      }
+      function load() {
+        try {
+          var raw = localStorage.getItem(key);
+          if (!raw) return;
+          var p = JSON.parse(raw);
+          if (!p) return;
+          if (p.rps) document.getElementById('load-rps').value = p.rps;
+          if (p.dur) document.getElementById('load-dur').value = p.dur;
+          if (p.mode) document.getElementById('load-mode').value = p.mode;
+          if (p.curve) document.getElementById('curve-type').value = p.curve;
+          if (p.up) { document.getElementById('phase-up').value = p.up; document.getElementById('phase-up-range').value = p.up; }
+          if (p.hold) { document.getElementById('phase-hold').value = p.hold; document.getElementById('phase-hold-range').value = p.hold; }
+          if (p.down) { document.getElementById('phase-down').value = p.down; document.getElementById('phase-down-range').value = p.down; }
+        } catch (e) { /* noop */ }
+      }
+      // sync sliders/inputs and summary
+      function updatePhaseSummary() {
+        var up = parseFloat(document.getElementById('phase-up').value || '70');
+        var hold = parseFloat(document.getElementById('phase-hold').value || '20');
+        var down = parseFloat(document.getElementById('phase-down').value || '10');
+        var total = up + hold + down; if (!isFinite(total) || total <= 0) total = 100;
+        var nu = (up / total) || 0; var nh = (hold / total) || 0; var nd = (down / total) || 0;
+        document.getElementById('phase-summary').textContent = 'Normalized: Up ' + nu.toFixed(2) + ' • Hold ' + nh.toFixed(2) + ' • Down ' + nd.toFixed(2);
+      }
+      // linked sliders: when one changes, adjust the other two proportionally to keep total ~= 100
+      function adjustLinked(changedNumId, newVal) {
+        var ids = ['phase-up', 'phase-hold', 'phase-down'];
+        // clamp
+        newVal = Math.max(0, Math.min(100, Number(newVal) || 0));
+        // read current values
+        var vals = {};
+        ids.forEach(function (id) { vals[id] = Number(document.getElementById(id).value) || 0; });
+        vals[changedNumId] = newVal;
+        var remaining = 100 - vals[changedNumId];
+        if (remaining <= 0) {
+          // set others to zero
+          ids.forEach(function (id) { if (id !== changedNumId) vals[id] = 0; });
+        } else {
+          var otherIds = ids.filter(function (id) { return id !== changedNumId; });
+          var sumOthers = otherIds.reduce(function (s, id) { return s + vals[id]; }, 0);
+          if (sumOthers <= 0) {
+            // split remaining equally
+            var each = Math.floor(remaining / otherIds.length);
+            otherIds.forEach(function (id) { vals[id] = each; });
+            // distribute remainder
+            var rem = remaining - each * otherIds.length;
+            for (var i = 0; i < rem; i++) vals[otherIds[i % otherIds.length]] += 1;
+          } else {
+            // scale others proportionally
+            otherIds.forEach(function (id) {
+              vals[id] = Math.round((vals[id] / sumOthers) * remaining);
+            });
+            // fix rounding to make total 100
+            var total = ids.reduce(function (s, id) { return s + vals[id]; }, 0);
+            var diff = 100 - total;
+            if (diff !== 0) {
+              // apply diff to the first other (or changed) to preserve sum
+              var target = otherIds[0] || changedNumId;
+              vals[target] = Math.max(0, vals[target] + diff);
+            }
+          }
+        }
+        // write back to DOM (both number and range inputs)
+        ids.forEach(function (id) {
+          var num = document.getElementById(id);
+          var range = document.getElementById(id + '-range');
+          if (num) num.value = vals[id];
+          if (range) range.value = vals[id];
+        });
+        updatePhaseSummary(); save();
+      }
+      function bindLinked(rangeId, numId) {
+        var r = document.getElementById(rangeId); var n = document.getElementById(numId);
+        if (!r || !n) return;
+        r.addEventListener('input', function () { adjustLinked(numId, Number(r.value)); });
+        n.addEventListener('change', function () { var v = Math.max(0, Math.min(100, Number(n.value) || 0)); adjustLinked(numId, v); });
+      }
+      bindLinked('phase-up-range', 'phase-up'); bindLinked('phase-hold-range', 'phase-hold'); bindLinked('phase-down-range', 'phase-down');
+      // save other controls on change
+      ['load-rps', 'load-dur', 'load-mode', 'curve-type'].forEach(function (id) { var el = document.getElementById(id); if (!el) return; el.addEventListener('change', save); });
+      // ensure summary updates
+      updatePhaseSummary(); load(); updatePhaseSummary();
+    })();
 
     // draw planned RPS curve into the small SVG
     function drawCurve(schedule) {
