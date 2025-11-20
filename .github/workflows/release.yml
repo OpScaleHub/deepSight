@@ -1,18 +1,26 @@
-name: Create Release
+name: Release: Binary and Container
 
 on:
   push:
     branches:
       - main
+
+# Define permissions for all jobs. Individual jobs only need to restrict if necessary.
 permissions:
-  contents: read            # allow reading repo content (needed for checkout/packaging)
-  packages: write           # allow pushing to GitHub Packages / GHCR
-  id-token: write           # optional: if you later use OIDC (e.g. cosign keyless signing)
+  contents: write    # For creating the Git tag and GitHub Release
+  packages: write    # For pushing to GitHub Packages / GHCR
+  id-token: write    # For potential OIDC use (kept for completeness)
+
+env:
+  # Binary/artifact base name
+  GO_APP_NAME: deepsight
+  # GHCR Image name (automatically lowercased for GHCR compatibility)
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/${{ env.GO_APP_NAME }}
 
 jobs:
+  ## 1. Determine the next version
   determine_version:
     runs-on: ubuntu-latest
-    # expose job outputs so downstream jobs can reference versify results
     outputs:
       should_release: ${{ steps.versify.outputs.should_release }}
       new_version: ${{ steps.versify.outputs.new_version }}
@@ -20,27 +28,25 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Needed for versify to scan history
 
-      - name: Download and Install Versify
+      - name: Setup Versify
+        id: versify_setup
         run: |
+          # Use a GitHub Action to install a release binary, if possible, or stick to curl
           curl -L "https://github.com/OpScaleHub/versify/releases/latest/download/versify-linux-amd64.tar.gz" -o versify.tar.gz
           tar -xzvf versify.tar.gz
           chmod +x versify-linux-amd64
           sudo mv versify-linux-amd64 /usr/local/bin/versify
-          rm versify.tar.gz
 
-      - name: Run versify to determine next version
+      - name: Run Versify and Check Tag
         id: versify
         run: |
-          # Run versify to get the proposed version
           VERSION=$(versify)
           echo "Proposed version: $VERSION"
-
-          # Check if the tag already exists
+          
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "Tag $VERSION already exists. No new release needed."
-            # Use the new workflow output file instead of deprecated set-output
+            echo "Tag $VERSION already exists. Skipping release."
             echo "should_release=false" >> $GITHUB_OUTPUT
           else
             echo "New version $VERSION will be released."
@@ -48,17 +54,19 @@ jobs:
             echo "new_version=$VERSION" >> $GITHUB_OUTPUT
           fi
 
-  build_and_test:
+  ---
+
+  ## 2. Build binaries and container image
+  build_all:
     needs: determine_version
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    env:
-      # binary/artifact base name — required to avoid filenames that start with a dash
-      GO_APP_NAME: deepsight
+    
+    # Define a custom matrix for building the binaries
     strategy:
       fail-fast: false
       matrix:
-        include:
+        go_target:
           - goos: linux
             goarch: amd64
           - goos: linux
@@ -67,100 +75,74 @@ jobs:
             goarch: amd64
           - goos: windows
             goarch: amd64
+    
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full clone so the matrix jobs have access to tags/history if needed
           fetch-depth: 0
-          fetch-tags: true
 
-      - name: Set up Go ${{ matrix.goos }} / ${{ matrix.goarch }}
+      - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.21'
 
-      - name: Download Go Modules
-        run: go mod tidy
-
-      - name: Test
-        run: go test -v ./...
-
-      - name: Build and Package Binary
+      - name: Download Go Modules and Test
         run: |
-          EXT=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            EXT=".exe"
-          fi
-          FILENAME="${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
-          echo "Building $FILENAME for GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }}"
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o $FILENAME .
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip "${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.zip" "$FILENAME"
-            ARTIFACT_PATH="${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.zip"
+          go mod tidy
+          go test -v ./...
+          
+      - name: Build and Package Binary (${{ matrix.go_target.goos }}/${{ matrix.go_target.goarch }})
+        run: |
+          GOOS=${{ matrix.go_target.goos }} GOARCH=${{ matrix.go_target.goarch }} \
+          go build -ldflags="-s -w" -o ${{ env.GO_APP_NAME }}-${{ matrix.go_target.goos }}-${{ matrix.go_target.goarch }} .
+          
+          # Use consistent naming for archiving
+          ARCHIVE_FILE="${{ env.GO_APP_NAME }}-${{ matrix.go_target.goos }}-${{ matrix.go_target.goarch }}"
+          if [ "${{ matrix.go_target.goos }}" = "windows" ]; then
+            zip "$ARCHIVE_FILE.zip" "$ARCHIVE_FILE"
+            echo "ARCHIVE_PATH=$ARCHIVE_FILE.zip" >> $GITHUB_ENV
           else
-            tar -czf "${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" "$FILENAME"
-            ARTIFACT_PATH="${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+            tar -czf "$ARCHIVE_FILE.tar.gz" "$ARCHIVE_FILE"
+            echo "ARCHIVE_PATH=$ARCHIVE_FILE.tar.gz" >> $GITHUB_ENV
           fi
-          echo "ARTIFACT_PATH=$ARTIFACT_PATH" >> $GITHUB_ENV
 
-      - name: Upload Artifact
+      - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          # upload the generated archive (tar.gz or zip). Use a glob to match either.
-          path: ${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.*
+          name: ${{ env.GO_APP_NAME }}-${{ matrix.go_target.goos }}-${{ matrix.go_target.goarch }}
+          path: ${{ env.ARCHIVE_PATH }}
           retention-days: 1
+  
+  ---
 
+  ## 3. Publish container image (Moved to its own job)
   publish_image:
-    needs: [determine_version, build_and_test]
+    # This job can run immediately after determining the version, it doesn't strictly need to wait for all matrix builds to finish.
+    needs: [determine_version]
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    
+    # We explicitly define permissions here as well, though the global block covers it.
     permissions:
       contents: read
       packages: write
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Log in to GitHub Container Registry (GITHUB_TOKEN)
-        uses: docker/login-action@v2
+      - name: Set up QEMU and Buildx (Required for multi-arch build)
+        uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Compute lowercase repository name
-        id: repo_lc
-        run: |
-          # GITHUB_REPOSITORY is of the form owner/repo — lowercase it for container tags
-          REPO_LC=$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
-          echo "repo_lc=$REPO_LC" >> $GITHUB_OUTPUT
-
-      - name: Show image tags
-        run: |
-          echo "Resolved image tags:"
-          echo "  ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:latest"
-          echo "  ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:${{ needs.determine_version.outputs.new_version }}"
-
-      - name: Debug show resolved tags and test auth
-        run: |
-          echo "REPO: $GITHUB_REPOSITORY"
-          REPO_LC=$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
-          echo "Tags:"
-          echo "  ghcr.io/$REPO_LC:latest"
-          echo "  ghcr.io/$REPO_LC:${{ needs.determine_version.outputs.new_version }}"
-          # Quick auth test: list tags (HTTP status printed)
-          TOKEN=${{ secrets.GITHUB_TOKEN }}
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/$REPO_LC/tags/list" || echo "000")
-          echo "tags/list status: $STATUS"
-
-      - name: Build and push Docker image
+      - name: Build and push Docker image 🚀
         id: build_image
         uses: docker/build-push-action@v5
         with:
@@ -168,22 +150,24 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
+          # USE THE CORRECT IMAGE TAGS HERE, leveraging the IMAGE_NAME env var
           tags: |
-            ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:latest
-            ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:${{ needs.determine_version.outputs.new_version }}
-
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ needs.determine_version.outputs.new_version }}
+            
       - name: Show image digest
-        run: |
-          echo "Built image digest: ${BUILD_DIGEST:-${{ steps.build_image.outputs.digest }}}"
-          echo "image_digest=${{ steps.build_image.outputs.digest }}" >> $GITHUB_OUTPUT
+        run: echo "Built image digest: ${{ steps.build_image.outputs.digest }}"
 
+  ---
 
+  ## 4. Create GitHub Release
   create_release:
-    needs: [determine_version, build_and_test, publish_image]
+    # Wait for the binaries and the image to be fully processed
+    needs: [determine_version, build_all, publish_image] 
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # Required to create a release and push a tag
+    # The global permission block covers the 'contents: write' needed here.
+
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
