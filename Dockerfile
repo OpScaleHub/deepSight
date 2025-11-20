@@ -29,8 +29,8 @@ EXPOSE 8080
 # source repository and show metadata in the Packages UI. Update values if needed.
 LABEL org.opencontainers.image.title="deepSight"
 LABEL org.opencontainers.image.description="A tiny uptime & runtime dashboard"
-LABEL org.opencontainers.image.url="https://github.com/OpScaleHub/deepSight"
-LABEL org.opencontainers.image.source="https://github.com/OpScaleHub/deepSight"
+LABEL org.opencontainers.image.url="https://github.com/opscaleHub/deepsight"
+LABEL org.opencontainers.image.source="https://github.com/opscalehub/deepsight"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # Run the Go binary
