@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+permissions:
+  contents: read            # allow reading repo content (needed for checkout/packaging)
+  packages: write           # allow pushing to GitHub Packages / GHCR
+  id-token: write           # optional: if you later use OIDC (e.g. cosign keyless signing)
 
 jobs:
   determine_version:
@@ -107,7 +111,6 @@ jobs:
           path: ${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.*
           retention-days: 1
 
-
   publish_image:
     needs: [determine_version, build_and_test]
     if: needs.determine_version.outputs.should_release == 'true'
@@ -144,6 +147,18 @@ jobs:
           echo "Resolved image tags:"
           echo "  ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:latest"
           echo "  ghcr.io/${{ steps.repo_lc.outputs.repo_lc }}:${{ needs.determine_version.outputs.new_version }}"
+
+      - name: Debug show resolved tags and test auth
+        run: |
+          echo "REPO: $GITHUB_REPOSITORY"
+          REPO_LC=$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          echo "Tags:"
+          echo "  ghcr.io/$REPO_LC:latest"
+          echo "  ghcr.io/$REPO_LC:${{ needs.determine_version.outputs.new_version }}"
+          # Quick auth test: list tags (HTTP status printed)
+          TOKEN=${{ secrets.GITHUB_TOKEN }}
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "https://ghcr.io/v2/$REPO_LC/tags/list" || echo "000")
+          echo "tags/list status: $STATUS"
 
       - name: Build and push Docker image
         id: build_image
