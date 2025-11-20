@@ -5,34 +5,28 @@ on:
     branches:
       - main
 
-# Define permissions for all jobs.
 permissions:
-  contents: write    # For creating the Git tag and GitHub Release
-  packages: write    # For pushing to GitHub Packages / GHCR
-  id-token: write    # For potential OIDC use
+  contents: write
+  packages: write
+  id-token: write
 
 env:
-  # Binary/artifact base name
   GO_APP_NAME: deepsight
-  # GHCR Image name (uses the lowercase owner name automatically)
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/${{ env.GO_APP_NAME }}
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/deepsight
 
 jobs:
-  ## 1. Determine the next version
   determine_version:
     runs-on: ubuntu-latest
     outputs:
       should_release: ${{ steps.versify.outputs.should_release }}
       new_version: ${{ steps.versify.outputs.new_version }}
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Needed for versify to scan history
+          fetch-depth: 0
 
       - name: Setup Versify
         run: |
-          # Download and install the versify tool
           curl -L "https://github.com/OpScaleHub/versify/releases/latest/download/versify-linux-amd64.tar.gz" -o versify.tar.gz
           tar -xzvf versify.tar.gz
           chmod +x versify-linux-amd64
@@ -43,26 +37,21 @@ jobs:
         run: |
           VERSION=$(versify)
           echo "Proposed version: $VERSION"
-          
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
-            echo "Tag $VERSION already exists. Skipping release."
             echo "should_release=false" >> $GITHUB_OUTPUT
           else
-            echo "New version $VERSION will be released."
             echo "should_release=true" >> $GITHUB_OUTPUT
             echo "new_version=$VERSION" >> $GITHUB_OUTPUT
           fi
 
-  ## 2. Build binaries and container image
   build_all:
     needs: determine_version
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    
     strategy:
       fail-fast: false
       matrix:
-        go_target:
+        include:
           - goos: linux
             goarch: amd64
           - goos: linux
@@ -71,31 +60,25 @@ jobs:
             goarch: amd64
           - goos: windows
             goarch: amd64
-    
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v4
+      - uses: actions/setup-go@v4
         with:
           go-version: '1.21'
 
-      - name: Download Go Modules and Test
-        run: |
+      - run: |
           go mod tidy
           go test -v ./...
-          
-      - name: Build and Package Binary (${{ matrix.go_target.goos }}/${{ matrix.go_target.goarch }})
+
+      - name: Build and Package Binary (${{ matrix.goos }}/${{ matrix.goarch }})
         run: |
-          # Build the binary
-          GOOS=${{ matrix.go_target.goos }} GOARCH=${{ matrix.go_target.goarch }} \
-          go build -ldflags="-s -w" -o ${{ env.GO_APP_NAME }}-${{ matrix.go_target.goos }}-${{ matrix.go_target.goarch }} .
-          
-          # Create the archive (zip for windows, tar.gz otherwise)
-          ARCHIVE_FILE="${{ env.GO_APP_NAME }}-${{ matrix.go_target.goos }}-${{ matrix.go_target.goarch }}"
-          if [ "${{ matrix.go_target.goos }}" = "windows" ]; then
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          go build -ldflags="-s -w" -o ${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }} .
+          ARCHIVE_FILE="${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
             zip "$ARCHIVE_FILE.zip" "$ARCHIVE_FILE"
             echo "ARCHIVE_PATH=$ARCHIVE_FILE.zip" >> $GITHUB_ENV
           else
@@ -103,35 +86,25 @@ jobs:
             echo "ARCHIVE_PATH=$ARCHIVE_FILE.tar.gz" >> $GITHUB_ENV
           fi
 
-      - name: Upload Binary Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.GO_APP_NAME }}-${{ matrix.go_target.goos }}-${{ matrix.go_target.goarch }}
+          name: ${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.ARCHIVE_PATH }}
           retention-days: 1
-  
-  ## 3. Publish container image
+
   publish_image:
-    # Runs concurrently with build_all
-    needs: [determine_version]
+    needs: determine_version
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU and Buildx
-        uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build and push Docker image 🚀
         id: build_image
         uses: docker/build-push-action@v5
@@ -140,29 +113,20 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          # Tags generated using the IMAGE_NAME env variable, which uses github.repository_owner (guaranteed lowercase)
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ needs.determine_version.outputs.new_version }}
-            
-      - name: Show image digest
-        run: echo "Built image digest: ${{ steps.build_image.outputs.digest }}"
+      - run: echo "Built image digest: ${{ steps.build_image.outputs.digest }}"
 
-  ## 4. Create GitHub Release
   create_release:
-    # Wait for the binaries and the image to be fully processed
-    needs: [determine_version, build_all, publish_image] 
+    needs: [determine_version, build_all, publish_image]
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-
     steps:
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.determine_version.outputs.new_version }}
           name: Release ${{ needs.determine_version.outputs.new_version }}
