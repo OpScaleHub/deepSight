@@ -116,7 +116,6 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ needs.determine_version.outputs.new_version }}
-      - run: echo "Built image digest: ${{ steps.build_image.outputs.digest }}"
 
   create_release:
     needs: [determine_version, build_all, publish_image]
