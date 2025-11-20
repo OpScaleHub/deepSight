@@ -45,3 +45,4 @@ Notes:
 - The app serves static files from `/static` and templates from `templates` at runtime — the Dockerfile copies the full repo before building.
 
 # adding CD
+---
