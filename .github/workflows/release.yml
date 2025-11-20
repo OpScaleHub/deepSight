@@ -1,4 +1,4 @@
-name: Release: Binary and Container
+name: Release Binary and Container
 
 on:
   push:
