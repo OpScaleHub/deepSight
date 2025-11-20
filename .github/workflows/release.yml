@@ -5,16 +5,16 @@ on:
     branches:
       - main
 
-# Define permissions for all jobs. Individual jobs only need to restrict if necessary.
+# Define permissions for all jobs.
 permissions:
   contents: write    # For creating the Git tag and GitHub Release
   packages: write    # For pushing to GitHub Packages / GHCR
-  id-token: write    # For potential OIDC use (kept for completeness)
+  id-token: write    # For potential OIDC use
 
 env:
   # Binary/artifact base name
   GO_APP_NAME: deepsight
-  # GHCR Image name (automatically lowercased for GHCR compatibility)
+  # GHCR Image name (uses the lowercase owner name automatically)
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/${{ env.GO_APP_NAME }}
 
 jobs:
@@ -31,9 +31,8 @@ jobs:
           fetch-depth: 0 # Needed for versify to scan history
 
       - name: Setup Versify
-        id: versify_setup
         run: |
-          # Use a GitHub Action to install a release binary, if possible, or stick to curl
+          # Download and install the versify tool
           curl -L "https://github.com/OpScaleHub/versify/releases/latest/download/versify-linux-amd64.tar.gz" -o versify.tar.gz
           tar -xzvf versify.tar.gz
           chmod +x versify-linux-amd64
@@ -54,15 +53,12 @@ jobs:
             echo "new_version=$VERSION" >> $GITHUB_OUTPUT
           fi
 
-  ---
-
   ## 2. Build binaries and container image
   build_all:
     needs: determine_version
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     
-    # Define a custom matrix for building the binaries
     strategy:
       fail-fast: false
       matrix:
@@ -93,10 +89,11 @@ jobs:
           
       - name: Build and Package Binary (${{ matrix.go_target.goos }}/${{ matrix.go_target.goarch }})
         run: |
+          # Build the binary
           GOOS=${{ matrix.go_target.goos }} GOARCH=${{ matrix.go_target.goarch }} \
           go build -ldflags="-s -w" -o ${{ env.GO_APP_NAME }}-${{ matrix.go_target.goos }}-${{ matrix.go_target.goarch }} .
           
-          # Use consistent naming for archiving
+          # Create the archive (zip for windows, tar.gz otherwise)
           ARCHIVE_FILE="${{ env.GO_APP_NAME }}-${{ matrix.go_target.goos }}-${{ matrix.go_target.goarch }}"
           if [ "${{ matrix.go_target.goos }}" = "windows" ]; then
             zip "$ARCHIVE_FILE.zip" "$ARCHIVE_FILE"
@@ -113,25 +110,18 @@ jobs:
           path: ${{ env.ARCHIVE_PATH }}
           retention-days: 1
   
-  ---
-
-  ## 3. Publish container image (Moved to its own job)
+  ## 3. Publish container image
   publish_image:
-    # This job can run immediately after determining the version, it doesn't strictly need to wait for all matrix builds to finish.
+    # Runs concurrently with build_all
     needs: [determine_version]
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    
-    # We explicitly define permissions here as well, though the global block covers it.
-    permissions:
-      contents: read
-      packages: write
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up QEMU and Buildx (Required for multi-arch build)
+      - name: Set up QEMU and Buildx
         uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
@@ -150,7 +140,7 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          # USE THE CORRECT IMAGE TAGS HERE, leveraging the IMAGE_NAME env var
+          # Tags generated using the IMAGE_NAME env variable, which uses github.repository_owner (guaranteed lowercase)
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ needs.determine_version.outputs.new_version }}
@@ -158,15 +148,12 @@ jobs:
       - name: Show image digest
         run: echo "Built image digest: ${{ steps.build_image.outputs.digest }}"
 
-  ---
-
   ## 4. Create GitHub Release
   create_release:
     # Wait for the binaries and the image to be fully processed
     needs: [determine_version, build_all, publish_image] 
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    # The global permission block covers the 'contents: write' needed here.
 
     steps:
       - name: Download all build artifacts
