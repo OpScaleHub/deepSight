@@ -12,7 +12,6 @@ permissions:
 
 env:
   GO_APP_NAME: deepsight
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/deepsight
 
 jobs:
   determine_version:
@@ -105,11 +104,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set image name
-        env:
-          RAW_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/deepsight
-        run: echo "IMAGE_NAME=$(echo $RAW_IMAGE_NAME | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -123,17 +117,23 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set image name
+        env:
+          RAW_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/deepsight
+        run: |
+          # Lowercase the image name and export it for subsequent steps
+          echo "IMAGE_NAME=$(echo \"$RAW_IMAGE_NAME\" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Build and push Docker image 🚀
         id: build_image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ needs.determine_version.outputs.new_version }}
+        run: |
+          set -euo pipefail
+          echo "Building and pushing image: $IMAGE_NAME"
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -f ./Dockerfile \
+            -t "$IMAGE_NAME:latest" \
+            -t "$IMAGE_NAME:${{ needs.determine_version.outputs.new_version }}" \
+            --push .
 
   create_release:
     needs: [determine_version, build_all, publish_image]
