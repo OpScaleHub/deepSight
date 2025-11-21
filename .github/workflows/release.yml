@@ -6,8 +6,13 @@ on:
       - main
 
 permissions:
-  contents: write # Required to create releases and tags
-  packages: write # Required to publish packages to GHCR
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  GO_APP_NAME: deepsight
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/deepsight
 
 jobs:
   determine_version:
@@ -88,7 +93,7 @@ jobs:
           retention-days: 1
 
   publish_image:
-    needs: [determine_version, build_all]
+    needs: determine_version
     if: needs.determine_version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -122,8 +127,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          # Build and push a single-arch image (amd64) after multi-platform binary builds complete
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ needs.determine_version.outputs.new_version }}
