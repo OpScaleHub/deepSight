@@ -73,23 +73,26 @@ jobs:
           go mod tidy
           go test -v ./...
 
-      - name: Build and Package Binary (${{ matrix.goos }}/${{ matrix.goarch }})
+      - id: package
+        name: Build and Package Binary (${{ matrix.goos }}/${{ matrix.goarch }})
         run: |
+          set -e
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
           go build -ldflags="-s -w" -o ${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }} .
           ARCHIVE_FILE="${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             zip "$ARCHIVE_FILE.zip" "$ARCHIVE_FILE"
-            echo "ARCHIVE_PATH=$ARCHIVE_FILE.zip" >> $GITHUB_ENV
+            # Expose as a step output so later steps can access it in expressions
+            echo "archive_path=$ARCHIVE_FILE.zip" >> $GITHUB_OUTPUT
           else
             tar -czf "$ARCHIVE_FILE.tar.gz" "$ARCHIVE_FILE"
-            echo "ARCHIVE_PATH=$ARCHIVE_FILE.tar.gz" >> $GITHUB_ENV
+            echo "archive_path=$ARCHIVE_FILE.tar.gz" >> $GITHUB_OUTPUT
           fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.GO_APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: ${{ env.ARCHIVE_PATH }}
+          path: ${{ steps.package.outputs.archive_path }}
           retention-days: 1
 
   publish_image:
