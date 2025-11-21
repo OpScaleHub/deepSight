@@ -128,11 +128,13 @@ jobs:
         id: build_image
         run: |
           set -euo pipefail
-          echo "Building and pushing image: $IMAGE_NAME"
+          # Ensure IMAGE_NAME contains no stray quote characters which would break docker tag parsing
+          CLEAN_IMAGE_NAME=$(echo "$IMAGE_NAME" | tr -d '"')
+          echo "Building and pushing image: $CLEAN_IMAGE_NAME"
           docker buildx build --platform linux/amd64,linux/arm64 \
             -f ./Dockerfile \
-            -t "$IMAGE_NAME:latest" \
-            -t "$IMAGE_NAME:${{ needs.determine_version.outputs.new_version }}" \
+            -t "${CLEAN_IMAGE_NAME}:latest" \
+            -t "${CLEAN_IMAGE_NAME}:${{ needs.determine_version.outputs.new_version }}" \
             --push .
 
   create_release:
