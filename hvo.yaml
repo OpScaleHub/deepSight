@@ -1,0 +1,11 @@
+# hvo.yaml: how HVO runs deepsight (docs: hvo.yaml reference).
+name: deepsight
+type: web
+port: 8080
+health: /
+size: small
+# expose:
+#   host: deepsight.example.com   # publish over HTTPS
+# needs:
+#   postgres: {}                   # DATABASE_URL
+#   redis: {}                      # REDIS_URL
