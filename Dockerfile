@@ -22,6 +22,10 @@ FROM scratch
 # Copy the statically-linked binary from the builder stage.
 COPY --from=builder /app/main /main
 
+# HVO runs workloads with runAsNonRoot: the container must declare a numeric
+# non-root UID, otherwise the kubelet refuses to start it.
+USER 1001:1000
+
 # Expose port
 EXPOSE 8080
 
