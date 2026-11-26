@@ -5,7 +5,7 @@ port: 8080
 health: /
 size: small
 expose:
-  host: deepsight.think-lab.opscale.ir
+  host: deepsight.nalyx.dev
 # needs:
 #   postgres: {}                   # DATABASE_URL
 #   redis: {}                      # REDIS_URL
